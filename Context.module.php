@@ -1306,19 +1306,119 @@ MD;
         
         $rootDir = $this->config->paths->root;
         
-        // .cursorrules for Cursor IDE
-        $cursorRules = "Act as a ProcessWire Expert. Root: {$rootDir}\nContext: site/assets/context/\nFollow rules in site/assets/context/prompts/project-context.md";
-        file_put_contents($rootDir . '.cursorrules', $cursorRules);
-
-        // .claudecode.json for Claude Code
-        $claudeConfig = [
-            "name" => "PW-" . $this->config->httpHost,
-            "context" => [
-                "site/assets/context/templates.json",
-                "site/assets/context/prompts/project-context.md"
-            ]
+        // Process .cursorrules
+        $this->updateCursorRules($rootDir);
+        
+        // Process .claudecode.json
+        $this->updateClaudeCode($rootDir);
+    }
+    
+    /**
+     * Update .cursorrules file (add paths if not exists)
+     */
+    protected function updateCursorRules($rootDir) {
+        $cursorRulesPath = $rootDir . '.cursorrules';
+        
+        $contextPath = 'site/assets/context/';
+        $promptsPath = 'site/assets/context/prompts/project-context.md';
+        
+        $newLines = [
+            "# ProcessWire Context",
+            "Root: {$rootDir}",
+            "Context: {$contextPath}",
+            "Follow rules in {$promptsPath}"
         ];
-        file_put_contents($rootDir . '.claudecode.json', json_encode($claudeConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        if(file_exists($cursorRulesPath)) {
+            // File exists - check if our paths are already there
+            $content = file_get_contents($cursorRulesPath);
+            $lines = explode("\n", $content);
+            
+            $needsUpdate = false;
+            $linesToAdd = [];
+            
+            foreach($newLines as $newLine) {
+                $found = false;
+                foreach($lines as $line) {
+                    // Check if this path/rule already exists
+                    if(stripos($line, $contextPath) !== false || 
+                       stripos($line, $promptsPath) !== false ||
+                       stripos($line, 'ProcessWire Context') !== false) {
+                        $found = true;
+                        break;
+                    }
+                }
+                
+                if(!$found) {
+                    $linesToAdd[] = $newLine;
+                    $needsUpdate = true;
+                }
+            }
+            
+            if($needsUpdate) {
+                // Add missing lines
+                $content .= "\n\n" . implode("\n", $linesToAdd);
+                file_put_contents($cursorRulesPath, $content);
+            }
+            // else - all paths already exist, skip
+            
+        } else {
+            // File doesn't exist - create new
+            file_put_contents($cursorRulesPath, implode("\n", $newLines));
+        }
+    }
+    
+    /**
+     * Update .claudecode.json file (add context paths if not exists)
+     */
+    protected function updateClaudeCode($rootDir) {
+        $claudeCodePath = $rootDir . '.claudecode.json';
+        
+        $contextPaths = [
+            "site/assets/context/templates.json",
+            "site/assets/context/prompts/project-context.md"
+        ];
+        
+        if(file_exists($claudeCodePath)) {
+            // File exists - read and update
+            $content = file_get_contents($claudeCodePath);
+            $config = json_decode($content, true);
+            
+            if(!$config) {
+                // Invalid JSON - create new structure
+                $config = [
+                    "name" => "PW-" . $this->config->httpHost,
+                    "context" => []
+                ];
+            }
+            
+            // Ensure context array exists
+            if(!isset($config['context'])) {
+                $config['context'] = [];
+            }
+            
+            // Add missing paths
+            $needsUpdate = false;
+            foreach($contextPaths as $path) {
+                if(!in_array($path, $config['context'])) {
+                    $config['context'][] = $path;
+                    $needsUpdate = true;
+                }
+            }
+            
+            if($needsUpdate) {
+                file_put_contents($claudeCodePath, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            }
+            // else - all paths already exist, skip
+            
+        } else {
+            // File doesn't exist - create new
+            $config = [
+                "name" => "PW-" . $this->config->httpHost,
+                "context" => $contextPaths
+            ];
+            file_put_contents($claudeCodePath, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
     }
 
     protected function generateCreateTemplatePrompt() {
@@ -2513,7 +2613,7 @@ README;
         $out .= "</tbody></table>";
         
         $out .= "<div style='padding: 16px 24px; background: #f9fafb; border-top: 1px solid #e5e7eb;'>";
-        $out .= "<a href='../../module/edit?name=Context&collapse_info=1' style='color: #10b981; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;'>";
+        $out .= "<a href='../module/edit?name=Context&collapse_info=1' style='color: #10b981; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;'>";
         $out .= "<i class='fa fa-cog'></i> Edit configuration";
         $out .= "</a>";
         $out .= "</div>";
