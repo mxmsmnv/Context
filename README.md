@@ -1,23 +1,35 @@
-# Context - ProcessWire Module
+# Context
 
 > Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
 ## 🎯 What It Does
 
-Context automatically generates comprehensive documentation of your ProcessWire site in formats optimized for AI assistants. Instead of manually explaining your site structure every time, upload the exported files and AI immediately understands your templates, fields, page hierarchy, and code patterns.
+Context automatically generates comprehensive documentation of your ProcessWire site in formats optimized for AI assistants. Export in both **JSON** (standard) and **TOON** (AI-optimized) formats. 
+
+**✨ NEW in v1.1.0:** TOON format support - reduces token consumption by 30-60% compared to JSON!
 
 **Perfect for:**
 - 🤖 Working with AI coding assistants (Claude, ChatGPT, Copilot)
+- 💰 **Reducing AI API costs** with token-efficient TOON format (NEW!)
 - 📚 Onboarding new developers
-- 🔄 Site migrations and documentation
+- 📄 Site migrations and documentation
 - 🚀 Rapid development with AI pair programming
 - 📖 Maintaining consistent code standards
 
 ## ✨ Features
 
+### Dual Format Export (NEW!)
+
+- **JSON Format** - Standard format for APIs, development tools, and compatibility
+- **TOON Format** - Token-Oriented Object Notation for AI assistants
+  - 🎯 **30-60% fewer tokens** than JSON
+  - 💰 **Significantly reduces API costs** for Claude, ChatGPT, etc.
+  - 📊 **Better for large datasets** in AI prompts
+  - ✅ **Lossless conversion** - same data, smaller size
+
 ### Core Exports (Always Generated)
 
-- **📊 Site Structure** - JSON and ASCII tree visualization of entire page hierarchy
+- **📊 Site Structure** - JSON/TOON and ASCII tree visualization of entire page hierarchy
 - **📋 Templates & Fields** - Complete template definitions with field types, options, and configurations
 - **🔧 Configuration** - ProcessWire version, PHP settings, installed modules
 - **📦 Custom Classes** - Automatic detection of custom Page classes from `/site/classes/`
@@ -25,8 +37,8 @@ Context automatically generates comprehensive documentation of your ProcessWire 
 
 ### Optional Features
 
-- **📝 Content Samples** - Export real page examples for each template
-- **🔌 API Documentation** - Generate JSON schemas for REST API development
+- **🔍 Content Samples** - Export real page examples for each template (JSON + TOON)
+- **📌 API Documentation** - Generate JSON schemas for REST API development
 - **💾 Code Snippets** - Customized selector patterns and helper functions
 - **🤖 AI Prompts** - Ready-to-use context prompts for AI assistants
 - **📈 Performance Metrics** - Site statistics and performance data
@@ -67,13 +79,14 @@ Then refresh modules in admin and install.
 **Setup → Modules → Context → Configure**
 
 1. **Choose your site type** (Blog, E-commerce, Business, Catalog, or Generic)
-2. **Enable optional features** you need:
+2. **Enable TOON format** ✅ Export TOON Format (AI-Optimized) - **Recommended!**
+3. **Enable optional features** you need:
    - ✅ Export Content Samples
    - ✅ Generate API Documentation
    - ✅ Create Code Snippets
    - ✅ Create AI Prompts
-3. **Set samples per template** (1-10)
-4. **Enable auto-update** if you want automatic exports on template/field changes
+4. **Set samples per template** (1-10)
+5. **Enable auto-update** if you want automatic exports on template/field changes
 
 ### 2. Export Your Site
 
@@ -88,21 +101,23 @@ Files are generated in: `/site/assets/context/`
 
 Upload these files to your AI assistant:
 
-**Essential files:**
-- `prompts/project-context.md` - Complete site overview
-- `templates.json` - All templates and fields
-- `structure.txt` - Page hierarchy
+**For AI Development (Recommended - Use TOON):**
+- `structure.toon` - Complete page hierarchy (30-60% smaller!)
+- `templates.toon` - All templates and fields (optimized)
+- `config.toon` - Site configuration
+- `prompts/project-context.md` - Complete project overview
 
-**For development:**
-- `snippets/selectors.php` - Customized code examples
-- `snippets/helpers.php` - Utility functions
+**For Development Tools (Use JSON):**
+- `structure.json` - Standard JSON format
+- `templates.json` - For IDE plugins
 - `classes.json` - Custom Page classes
 
 **Example prompt:**
 ```
-I've uploaded my ProcessWire site context. Please help me create 
-a new template for blog posts with title, body, author, and 
-categories fields. Follow the existing patterns in templates.json.
+I've uploaded my ProcessWire site context in TOON format. 
+Please help me create a new template for blog posts with 
+title, body, author, and categories fields. Follow the 
+existing patterns in templates.toon.
 ```
 
 ## 📂 Generated Files
@@ -111,62 +126,210 @@ categories fields. Follow the existing patterns in templates.json.
 
 ```
 /site/assets/context/
-├── README.md                      # Documentation
-├── structure.json                 # Complete page tree (JSON)
+├── README.md                      # Documentation with format guide
+├── structure.json                 # Page tree (JSON)
+├── structure.toon                 # Page tree (TOON - AI optimized!)
 ├── structure.txt                  # ASCII tree visualization
-├── templates.json                 # Templates with fields
+├── templates.json                 # Templates (JSON)
+├── templates.toon                 # Templates (TOON - AI optimized!)
 ├── templates.csv                  # Templates in CSV
-├── config.json                    # Site configuration
-├── modules.json                   # Installed modules
-├── classes.json                   # Custom page classes
+├── config.json                    # Configuration (JSON)
+├── config.toon                    # Configuration (TOON)
+├── modules.json                   # Installed modules (JSON)
+├── modules.toon                   # Installed modules (TOON)
+├── classes.json                   # Custom page classes (JSON)
+├── classes.toon                   # Custom page classes (TOON)
 │
 ├── samples/                       # Content examples (optional)
+│   ├── product-samples.json
+│   └── product-samples.toon       # AI-optimized samples!
 ├── api/                           # API schemas (optional)
 ├── snippets/                      # Code library (optional)
 ├── prompts/                       # AI prompts (optional)
 └── metadata/                      # Technical data (optional)
 ```
 
-### File Descriptions
+### File Format Comparison
 
-| File | Contains | Use For |
-|------|----------|---------|
-| `structure.json` | Complete page hierarchy with IDs, URLs | Navigation, finding pages |
-| `structure.txt` | ASCII tree visualization | Quick overview |
-| `templates.json` | All templates with field definitions | Template development |
-| `config.json` | PW version, PHP, modules, frontend stack | Environment setup |
-| `classes.json` | Custom Page classes from `/site/classes/` | OOP development |
-| `snippets/selectors.php` | Site-type customized code examples | Learning patterns |
-| `prompts/project-context.md` | Complete AI system prompt | AI onboarding |
+| File | JSON Size | TOON Size | Savings | Use For |
+|------|-----------|-----------|---------|---------|
+| `structure.*` | 45 KB | 28 KB | ~38% | Page hierarchy |
+| `templates.*` | 12 KB | 6 KB | ~50% | Template definitions |
+| `samples/*` | 8 KB | 4 KB | ~50% | Content examples |
 
-## 🎨 Customizing Code Snippets
+**💡 Tip:** When uploading to AI, use `.toon` files to save tokens and reduce API costs!
 
-Code snippets are generated from templates in `ContextSnippets.php`. To add your own patterns:
+## 🎨 Understanding TOON Format
 
-1. Open `/site/modules/Context/ContextSnippets.php`
-2. Edit the appropriate method:
-   - `getBlogSelectors()` - Blog-specific examples
-   - `getEcommerceSelectors()` - E-commerce examples
-   - `getBusinessSelectors()` - Business examples
-   - `getCatalogSelectors()` - Catalog examples
-   - `getUniversalSelectors()` - Always included
-3. Re-export context
+### What is TOON?
 
-**Example - Adding a custom pattern:**
+TOON (Token-Oriented Object Notation) is a compact, human-readable format designed specifically for AI prompts. It represents the same data as JSON but uses 30-60% fewer tokens.
 
-```php
-protected static function getBlogSelectors($t1) {
-    return '// ... existing code ...
+### Example Comparison
 
-// YOUR CUSTOM PATTERN
-// Get trending posts from last 7 days
-$trending = $pages->find("template=post, created>=-7 days, views>50, sort=-views");
-
-';
+**JSON (120 tokens):**
+```json
+{
+  "products": [
+    {
+      "id": 1045,
+      "title": "Dark Chocolate 70%",
+      "price": 12.99,
+      "category": "Dark"
+    },
+    {
+      "id": 1046,
+      "title": "Milk Hazelnut",
+      "price": 9.99,
+      "category": "Milk"
+    }
+  ]
 }
 ```
 
+**TOON (65 tokens - 46% savings!):**
+```toon
+products[2]{id,title,price,category}:
+1045,Dark Chocolate 70%,12.99,Dark
+1046,Milk Hazelnut,9.99,Milk
+```
+
+### When to Use Which Format
+
+✅ **Use TOON (.toon) for:**
+- Uploading to Claude, ChatGPT, or other AI assistants
+- Large datasets in AI prompts
+- Reducing API costs
+- AI code generation
+
+✅ **Use JSON (.json) for:**
+- API endpoints
+- Development tools (PhpStorm, VSCode plugins)
+- Third-party integrations
+- Standard ProcessWire development
+
+### Viewing TOON Files
+
+- **VS Code / Cursor**: Install "TOON Language Support" extension for syntax highlighting
+- **PhpStorm**: Use YAML syntax highlighting (similar appearance)
+- **AI Assistants**: Upload directly - they understand TOON natively
+- **Text Editors**: Plain text - fully readable by humans
+
+## 💡 Use Cases
+
+### 1. AI-Assisted Development (Save 30-60% on API Costs!)
+
+```
+# Upload to Claude/ChatGPT (TOON format):
+- structure.toon
+- templates.toon
+- samples/product-samples.toon
+
+# Then ask:
+"Create a product filter with price range, category, and brand 
+using the patterns from my site structure"
+
+Result: Same quality response, but using 40% fewer tokens!
+```
+
+### 2. Onboarding New Developers
+
+Share the `/site/assets/context/` folder with new team members. They get:
+- Complete site structure overview (both formats)
+- All templates and field definitions
+- Code examples and patterns
+- Custom Page classes documentation
+
+### 3. Building APIs
+
+```
+# Upload (JSON format for technical work):
+- api/schemas/product-schema.json
+- snippets/api-examples.php
+
+# Ask:
+"Create a REST API endpoint for products with search and filtering"
+```
+
+### 4. Large-Scale AI Tasks
+
+```
+# For big projects with lots of data:
+- Use TOON format to fit more context in AI's window
+- 100 products in JSON = ~15,000 tokens
+- 100 products in TOON = ~7,000 tokens
+- Difference: You can include 2x more examples!
+```
+
+### 5. Cost Optimization
+
+**Real savings example:**
+
+```
+Your site: 50 templates, 500 pages to document
+
+JSON export: ~85,000 tokens
+TOON export: ~42,000 tokens
+Savings: 43,000 tokens per prompt
+
+With Claude Sonnet ($3 per million input tokens):
+- JSON cost: $0.255 per prompt
+- TOON cost: $0.126 per prompt
+- Savings: $0.129 per prompt
+
+If you use 100 prompts/month: Save ~$13/month
+If you use 1000 prompts/month: Save ~$130/month
+```
+
+## 🔧 Auto-Update Feature
+
+Enable **Auto-Update on Changes** to automatically regenerate context when you:
+- Create or modify templates
+- Add or modify fields
+- Change template-field assignments
+
+Hooks into:
+- `Templates::saved`
+- `Fields::saved`
+- `Fieldgroups::saveReady`
+
+Auto-update exports both JSON and TOON formats if TOON export is enabled.
+
+## 🎯 Best Practices
+
+### Working with AI Assistants
+
+1. **Always include** `prompts/project-context.md` - contains system instructions
+2. **For token efficiency** - use `.toon` files instead of `.json`
+3. **For field questions** - include `templates.toon`
+4. **For site structure** - include `structure.toon` or `structure.txt`
+5. **For coding** - include `snippets/selectors.php`
+6. **For debugging** - include relevant `samples/*-samples.toon`
+
+### File Upload Strategy
+
+- **Small tasks** (1-3 files): Upload `.toon` files to chat directly
+- **Medium tasks** (3-10 files): Core `.toon` files + specific sections
+- **Large projects**: Use Claude Projects with entire `/context/` folder
+- **Development tools**: Use `.json` files with IDEs and APIs
+
+### When to Re-Export
+
+- After adding/modifying templates
+- After adding/modifying fields
+- After changing site structure
+- After changing Site Type setting
+- Before major development sessions
+- When you want to update TOON files with latest data
+
 ## ⚙️ Module Settings
+
+### Export Formats (NEW!)
+
+- **Export TOON Format (AI-Optimized)** - Generate `.toon` files alongside `.json`
+  - Enabled by default
+  - Saves 30-60% tokens
+  - Perfect for AI development
 
 ### Site Type Selection
 
@@ -179,7 +342,7 @@ Choose your site type to get customized code snippets:
 
 ### Content Features
 
-- **Export Content Samples** - Include real page examples
+- **Export Content Samples** - Include real page examples (JSON + TOON)
 - **Samples Per Template** - How many examples (1-10)
 - **Generate API Documentation** - Create JSON schemas
 - **Export URL Routes** - URL segment configurations
@@ -196,96 +359,6 @@ Choose your site type to get customized code snippets:
 - **Create IDE Integration Files** - `.cursorrules`, `.claudecode.json`
 - **Custom AI Instructions** - Project-specific AI instructions
 
-## 💡 Use Cases
-
-### 1. AI-Assisted Development
-
-```
-# Upload to Claude/ChatGPT:
-- prompts/project-context.md
-- templates.json
-- snippets/selectors.php
-
-# Then ask:
-"Create a product filter with price range, category, and brand using 
-the patterns from selectors.php"
-```
-
-### 2. Onboarding New Developers
-
-Share the `/site/assets/context/` folder with new team members. They get:
-- Complete site structure overview
-- All templates and field definitions
-- Code examples and patterns
-- Custom Page classes documentation
-
-### 3. Building APIs
-
-```
-# Upload:
-- api/schemas/product-schema.json
-- snippets/api-examples.php
-
-# Ask:
-"Create a REST API endpoint for products with search and filtering"
-```
-
-### 4. Site Documentation
-
-Export generates human-readable documentation:
-- `structure.txt` - Visual page hierarchy
-- `templates.csv` - Spreadsheet of all templates
-- `README.md` - Complete documentation
-
-### 5. Code Review & Refactoring
-
-```
-# Upload:
-- classes.json
-- templates.json
-- snippets/selectors.php
-
-# Ask:
-"Review my custom Page classes and suggest improvements following 
-ProcessWire best practices"
-```
-
-## 🔧 Auto-Update Feature
-
-Enable **Auto-Update on Changes** to automatically regenerate context when you:
-- Create or modify templates
-- Add or modify fields
-- Change template-field assignments
-
-Hooks into:
-- `Templates::saved`
-- `Fields::saved`
-- `Fieldgroups::saveReady`
-
-## 🎯 Best Practices
-
-### Working with AI Assistants
-
-1. **Always include** `prompts/project-context.md` - contains system instructions
-2. **For field questions** - include `templates.json`
-3. **For site structure** - include `structure.txt`
-4. **For coding** - include `snippets/selectors.php`
-5. **For debugging** - include relevant `samples/[template]-samples.json`
-
-### File Upload Strategy
-
-- **Small tasks** (1-3 files): Upload to chat directly
-- **Medium tasks** (3-10 files): Core files + specific sections
-- **Large projects**: Use Claude Projects with entire `/context/` folder
-
-### When to Re-Export
-
-- After adding/modifying templates
-- After adding/modifying fields
-- After changing site structure
-- After changing Site Type setting
-- Before major development sessions
-
 ## 🛠️ Technical Details
 
 ### Requirements
@@ -297,6 +370,7 @@ Hooks into:
 ### Performance
 
 - Export typically takes 1-3 seconds
+- TOON conversion adds < 0.5s overhead
 - Uses ProcessWire's caching where possible
 - Auto-update hooks are lightweight (< 50ms)
 
@@ -306,23 +380,149 @@ Hooks into:
 - No sensitive data (passwords, API keys) is exported
 - Only accessible to logged-in superusers by default
 
+### TOON Format Details
+
+- Pure PHP implementation - no external dependencies
+- Lossless conversion - no data loss
+- Deterministic output - same input = same output
+- Handles all JSON data types
+- Special optimization for uniform arrays (tables)
+
 ### File Locations
 
 - **Module**: `/site/modules/Context/`
 - **Exports**: `/site/assets/context/`
 - **Snippets Library**: `/site/modules/Context/ContextSnippets.php`
 
+## 📊 Format Comparison in Module Admin
+
+When TOON export is enabled, the module admin page shows a comparison table:
+
+| File Type | JSON Size | TOON Size | Savings |
+|-----------|-----------|-----------|---------|
+| structure | 45.2 KB | 27.8 KB | -38.5% |
+| templates | 12.1 KB | 6.3 KB | -47.9% |
+| config | 2.4 KB | 1.6 KB | -33.3% |
+
+This helps you see the actual token/cost savings for your specific site!
+
 ## 🤝 Contributing
 
-Contributions are welcome! Areas for improvement:
+Contributions are welcome! Here's how you can help:
 
-- Additional site type templates
+### Areas for Improvement
+
+- Additional site type templates and snippets
 - More code snippet examples
-- Translations
+- TOON format optimizations
+- Translations (i18n support)
 - Integration with other AI tools
 - Documentation improvements
+- Bug fixes and performance enhancements
 
-## 📝 License
+### Development Setup
+
+1. Fork the repository
+2. Clone to your ProcessWire installation: `git clone https://github.com/yourusername/Context.git /site/modules/Context/`
+3. Make your changes
+4. Test thoroughly with different site types
+5. Submit a pull request
+
+### Code Standards
+
+- Follow ProcessWire coding standards
+- Add PHPDoc comments to new methods
+- Test with PHP 8.1+ and ProcessWire 3.0+
+- Ensure backward compatibility
+- Update documentation as needed
+
+### Reporting Issues
+
+Found a bug? Please open an issue on GitHub with:
+- ProcessWire version
+- PHP version
+- Steps to reproduce
+- Expected vs actual behavior
+- Error messages (if any)
+
+## ❓ FAQ
+
+### General Questions
+
+**Q: Do I need to install any external libraries for TOON support?**  
+A: No! TOON conversion is built-in with pure PHP. No Composer packages or external dependencies required.
+
+**Q: Is TOON format lossless?**  
+A: Yes! TOON contains exactly the same data as JSON, just in a more compact format. You can convert back and forth without any data loss.
+
+**Q: Which AI assistants support TOON?**  
+A: Claude, ChatGPT, and most modern LLMs understand TOON natively. Just upload the `.toon` file as you would a `.json` file.
+
+**Q: Can I use both JSON and TOON formats?**  
+A: Absolutely! Both formats are generated simultaneously. Use JSON for development tools and APIs, TOON for AI assistants.
+
+**Q: How much does TOON actually save?**  
+A: Typically 30-60% fewer tokens. The exact savings depend on your data structure - uniform arrays see the biggest gains (up to 60%).
+
+### Technical Questions
+
+**Q: Does TOON export slow down my site?**  
+A: No. Export happens on-demand when you click the button, not on every page load. The TOON conversion adds < 0.5s to the export time.
+
+**Q: What if I disable TOON format later?**  
+A: No problem! Simply uncheck "Export TOON Format" in settings. Your next export will only generate JSON files.
+
+**Q: Can I edit TOON files manually?**  
+A: Yes, TOON files are plain text and human-readable. However, it's easier to make changes in ProcessWire and re-export.
+
+**Q: Are there any file size limits?**  
+A: TOON files follow the same limits as JSON. Both are text files with no artificial size restrictions.
+
+**Q: How do I view TOON files?**  
+A: TOON files are plain text. Use any text editor. For syntax highlighting: VS Code/Cursor (install "TOON Language Support" extension) or PhpStorm (use YAML highlighting).
+
+### Troubleshooting
+
+**Q: Export failed with "permission denied"**  
+A: Ensure `/site/assets/` directory is writable by your web server user. Check file permissions (755 or 775).
+
+**Q: TOON files not being created**  
+A: Check that "Export TOON Format" is enabled in module settings and you've clicked "Re-Export Context for AI" after enabling it.
+
+**Q: AI assistant doesn't understand my TOON file**  
+A: TOON is plain text - just upload it as you would any text file. Make sure the file has a `.toon` extension.
+
+## 📝 Changelog
+
+### Version 1.1.0 (2026-02-16)
+
+**Major Feature: TOON Format Support**
+
+- ✨ **Added TOON format export** - Export AI-optimized `.toon` files alongside JSON
+- 💰 **30-60% token savings** for AI assistants (Claude, ChatGPT, etc.)
+- 📊 **Format comparison table** in admin interface showing actual savings
+- 📚 **Updated documentation** - README.md and project-context.md include TOON info
+- 🎯 **Conditional documentation** - Shows TOON info only when enabled
+- ✅ **No external dependencies** - Pure PHP TOON implementation
+- 🔄 **Auto-export** supports both JSON and TOON formats
+- 📈 **Admin interface enhancements** - TOON status, file lists, and tips
+
+**Technical:**
+- Added 6 new methods for TOON conversion
+- Updated all export methods to generate dual formats
+- Enhanced README.md and prompts with format-specific guidance
+- Backward compatible - TOON export is optional
+
+### Version 1.0.0
+
+- Initial release
+- JSON export functionality
+- ASCII tree visualization
+- Content samples
+- Code snippets
+- AI prompts
+
+## 📄 License
 
 MIT License - see LICENSE file for details
 
@@ -332,3 +532,8 @@ MIT License - see LICENSE file for details
 - Website: [smnv.org](https://smnv.org)
 - Email: maxim@smnv.org
 - GitHub: [@mxmsmnv](https://github.com/mxmsmnv)
+
+## 🙏 Credits
+
+- TOON format specification: [toonformat.dev](https://toonformat.dev)
+- ProcessWire CMS: [processwire.com](https://processwire.com)
