@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.2', 
+            'version' => '1.1.3', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -955,19 +955,13 @@ class Context extends Process implements Module, ConfigurableModule {
     }
 
     /**
-     * Export complete site tree (structure + templates + fields)
-     * Technical overview without data - just the architecture
+     * Export complete site tree (templates with nested fields structure)
+     * Technical overview without data - just the field architecture
      */
     protected function exportTree() {
-        $tree = [
-            'site' => [
-                'name' => $this->config->httpHost,
-                'root' => '/',
-                'templates' => []
-            ]
-        ];
+        $tree = [];
         
-        $this->log("Building complete site tree...");
+        $this->log("Building site tree (templates + fields)...");
         
         // Get all templates with their fields
         foreach($this->templates as $template) {
@@ -976,9 +970,7 @@ class Context extends Process implements Module, ConfigurableModule {
             $templateData = [
                 'name' => $template->name,
                 'label' => $template->label ?: $template->name,
-                'id' => $template->id,
-                'fields' => [],
-                'pages_count' => $this->pages->count("template={$template->name}")
+                'fields' => []
             ];
             
             // Add all fields
@@ -991,27 +983,36 @@ class Context extends Process implements Module, ConfigurableModule {
                 
                 // Add subfield info for special types
                 if($field->type instanceof FieldtypePage) {
-                    $fieldData['references'] = 'Page';
                     if($field->template_id) {
                         $refTemplate = $this->templates->get($field->template_id);
-                        if($refTemplate) $fieldData['references_template'] = $refTemplate->name;
+                        if($refTemplate) {
+                            $fieldData['template'] = $refTemplate->name;
+                        }
                     }
                 } elseif($field->type->className() === 'FieldtypeRepeater') {
-                    $fieldData['repeater'] = true;
                     // Get repeater template
                     $repeaterTemplate = $this->templates->get("name=repeater_{$field->name}");
                     if($repeaterTemplate) {
                         $fieldData['subfields'] = [];
                         foreach($repeaterTemplate->fields as $repField) {
-                            $fieldData['subfields'][] = [
+                            $subFieldData = [
                                 'name' => $repField->name,
                                 'type' => $repField->type->className(),
                                 'label' => $repField->label
                             ];
+                            
+                            // Check if repeater subfield is also a Page reference
+                            if($repField->type instanceof FieldtypePage && $repField->template_id) {
+                                $refTemplate = $this->templates->get($repField->template_id);
+                                if($refTemplate) {
+                                    $subFieldData['template'] = $refTemplate->name;
+                                }
+                            }
+                            
+                            $fieldData['subfields'][] = $subFieldData;
                         }
                     }
                 } elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    $fieldData['matrix'] = true;
                     $fieldData['matrix_types'] = [];
                     
                     // Find all matrix templates for this field
@@ -1029,18 +1030,134 @@ class Context extends Process implements Module, ConfigurableModule {
                             
                             foreach($t->fields as $matrixField) {
                                 if($matrixField->name === 'repeater_matrix_type') continue;
-                                $matrixType['subfields'][] = [
+                                
+                                $subFieldData = [
                                     'name' => $matrixField->name,
                                     'type' => $matrixField->type->className(),
                                     'label' => $matrixField->label
                                 ];
+                                
+                                // Page reference in matrix
+                                if($matrixField->type instanceof FieldtypePage && $matrixField->template_id) {
+                                    $refTemplate = $this->templates->get($matrixField->template_id);
+                                    if($refTemplate) {
+                                        $subFieldData['template'] = $refTemplate->name;
+                                    }
+                                }
+                                // Table in matrix
+                                elseif($matrixField->type->className() === 'FieldtypeTable') {
+                                    $subFieldData['columns'] = [];
+                                    if(isset($matrixField->data) && is_array($matrixField->data)) {
+                                        $maxCols = isset($matrixField->data['maxCols']) ? (int)$matrixField->data['maxCols'] : 0;
+                                        for($i = 1; $i <= $maxCols; $i++) {
+                                            $colName = isset($matrixField->data["col{$i}name"]) ? $matrixField->data["col{$i}name"] : null;
+                                            if($colName) {
+                                                $subFieldData['columns'][] = [
+                                                    'name' => $colName,
+                                                    'type' => isset($matrixField->data["col{$i}type"]) ? $matrixField->data["col{$i}type"] : 'text'
+                                                ];
+                                            }
+                                        }
+                                    }
+                                }
+                                // Combo in matrix
+                                elseif($matrixField->type->className() === 'FieldtypeCombo') {
+                                    $subFieldData['subfields'] = [];
+                                    if(isset($matrixField->data) && is_array($matrixField->data)) {
+                                        $qty = isset($matrixField->data['qty']) ? (int)$matrixField->data['qty'] : 0;
+                                        for($i = 1; $i <= $qty; $i++) {
+                                            $nameKey = "i{$i}_name";
+                                            $typeKey = "i{$i}_type";
+                                            if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
+                                                $subFieldData['subfields'][] = [
+                                                    'name' => $matrixField->data[$nameKey],
+                                                    'type' => $matrixField->data[$typeKey]
+                                                ];
+                                            }
+                                        }
+                                    }
+                                }
+                                // Nested Matrix (Matrix inside Matrix)
+                                elseif($matrixField->type->className() === 'FieldtypeRepeaterMatrix') {
+                                    $subFieldData['matrix_types'] = [];
+                                    
+                                    // Find all nested matrix templates for this field
+                                    foreach($allTemplates as $nestedT) {
+                                        if(strpos($nestedT->name, "repeater_{$matrixField->name}") === 0 || 
+                                           strpos($nestedT->name, "repeater_matrix_{$matrixField->name}") === 0 ||
+                                           strpos($nestedT->name, "repeatermatrix_{$matrixField->name}") === 0) {
+                                            
+                                            $nestedMatrixType = [
+                                                'name' => $nestedT->name,
+                                                'label' => $nestedT->label ?: $nestedT->name,
+                                                'subfields' => []
+                                            ];
+                                            
+                                            foreach($nestedT->fields as $nestedField) {
+                                                if($nestedField->name === 'repeater_matrix_type') continue;
+                                                
+                                                $nestedSubFieldData = [
+                                                    'name' => $nestedField->name,
+                                                    'type' => $nestedField->type->className(),
+                                                    'label' => $nestedField->label
+                                                ];
+                                                
+                                                // Page reference in nested matrix
+                                                if($nestedField->type instanceof FieldtypePage && $nestedField->template_id) {
+                                                    $refTemplate = $this->templates->get($nestedField->template_id);
+                                                    if($refTemplate) {
+                                                        $nestedSubFieldData['template'] = $refTemplate->name;
+                                                    }
+                                                }
+                                                // Table in nested matrix
+                                                elseif($nestedField->type->className() === 'FieldtypeTable') {
+                                                    $nestedSubFieldData['columns'] = [];
+                                                    if(isset($nestedField->data) && is_array($nestedField->data)) {
+                                                        $maxCols = isset($nestedField->data['maxCols']) ? (int)$nestedField->data['maxCols'] : 0;
+                                                        for($i = 1; $i <= $maxCols; $i++) {
+                                                            $colName = isset($nestedField->data["col{$i}name"]) ? $nestedField->data["col{$i}name"] : null;
+                                                            if($colName) {
+                                                                $nestedSubFieldData['columns'][] = [
+                                                                    'name' => $colName,
+                                                                    'type' => isset($nestedField->data["col{$i}type"]) ? $nestedField->data["col{$i}type"] : 'text'
+                                                                ];
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                // Combo in nested matrix
+                                                elseif($nestedField->type->className() === 'FieldtypeCombo') {
+                                                    $nestedSubFieldData['subfields'] = [];
+                                                    if(isset($nestedField->data) && is_array($nestedField->data)) {
+                                                        $qty = isset($nestedField->data['qty']) ? (int)$nestedField->data['qty'] : 0;
+                                                        for($i = 1; $i <= $qty; $i++) {
+                                                            $nameKey = "i{$i}_name";
+                                                            $typeKey = "i{$i}_type";
+                                                            if(isset($nestedField->data[$nameKey]) && isset($nestedField->data[$typeKey])) {
+                                                                $nestedSubFieldData['subfields'][] = [
+                                                                    'name' => $nestedField->data[$nameKey],
+                                                                    'type' => $nestedField->data[$typeKey]
+                                                                ];
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                $nestedMatrixType['subfields'][] = $nestedSubFieldData;
+                                            }
+                                            
+                                            $subFieldData['matrix_types'][] = $nestedMatrixType;
+                                        }
+                                    }
+                                }
+                                
+                                $matrixType['subfields'][] = $subFieldData;
                             }
                             
                             $fieldData['matrix_types'][] = $matrixType;
                         }
                     }
                 } elseif($field->type->className() === 'FieldtypeTable') {
-                    $fieldData['table'] = true;
                     $fieldData['columns'] = [];
                     if(isset($field->data) && is_array($field->data)) {
                         $maxCols = isset($field->data['maxCols']) ? (int)$field->data['maxCols'] : 0;
@@ -1055,7 +1172,6 @@ class Context extends Process implements Module, ConfigurableModule {
                         }
                     }
                 } elseif($field->type->className() === 'FieldtypeCombo') {
-                    $fieldData['combo'] = true;
                     $fieldData['subfields'] = [];
                     if(isset($field->data) && is_array($field->data)) {
                         $qty = isset($field->data['qty']) ? (int)$field->data['qty'] : 0;
@@ -1075,44 +1191,20 @@ class Context extends Process implements Module, ConfigurableModule {
                 $templateData['fields'][] = $fieldData;
             }
             
-            $tree['site']['templates'][] = $templateData;
+            $tree[] = $templateData;
         }
         
-        // Add page structure overview
-        $this->log("Building page structure...");
-        $tree['structure'] = $this->buildTreeStructure($this->pages->get('/'));
-        
-        $this->log("Site tree built with " . count($tree['site']['templates']) . " templates");
+        $this->log("Site tree built with " . count($tree) . " templates");
         
         return $tree;
     }
     
     /**
      * Build tree structure recursively (template names only, no fields)
+     * DEPRECATED - no longer used
      */
     protected function buildTreeStructure($page, $depth = 0) {
-        if($depth >= $this->max_depth) return null;
-        
-        $node = [
-            'id' => $page->id,
-            'title' => $page->title,
-            'name' => $page->name,
-            'template' => $page->template->name,
-            'url' => $page->url
-        ];
-        
-        $children = $page->children("limit={$this->max_children}");
-        if($children->count()) {
-            $node['children'] = [];
-            foreach($children as $child) {
-                $childNode = $this->buildTreeStructure($child, $depth + 1);
-                if($childNode) {
-                    $node['children'][] = $childNode;
-                }
-            }
-        }
-        
-        return $node;
+        return null;
     }
 
     /**

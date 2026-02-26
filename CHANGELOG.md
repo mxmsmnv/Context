@@ -5,6 +5,54 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2026-02-26
+
+### Added
+
+#### Nested Matrix Support
+- **Recursive Matrix processing** - Full support for Matrix fields inside Matrix fields
+- **Deep nesting** - Matrix → Matrix → Table/Combo/Page references all properly exported
+- **Complete field structure** - Nested matrix types include all their subfields with types
+
+#### Example Structure
+```json
+{
+  "name": "menu",
+  "type": "FieldtypeRepeaterMatrix",
+  "matrix_types": [
+    {
+      "name": "repeater_menu",
+      "subfields": [
+        {
+          "name": "menu_section",
+          "type": "FieldtypeRepeaterMatrix",
+          "matrix_types": [
+            {
+              "name": "repeater_menu_section",
+              "subfields": [
+                {
+                  "name": "menu_food",
+                  "type": "FieldtypeTable",
+                  "columns": [...]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Technical
+- Added nested Matrix detection in exportTree() method
+- Processes Matrix fields at any depth level
+- Supports Page references, Table, and Combo inside nested Matrix
+- Uses same template detection logic for nested structures
+
+---
+
 ## [1.1.2] - 2026-02-26
 
 ### Added
