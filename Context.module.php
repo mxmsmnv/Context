@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.3', 
+            'version' => '1.1.4', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -4046,6 +4046,39 @@ README;
         $indent = str_repeat('  ', $level);
         $output = '';
         
+        // Handle indexed arrays (list of items)
+        if(isset($data[0]) && is_array($data)) {
+            // Check if this is a uniform array of objects (table format)
+            if($this->isTableFormat($data)) {
+                // Return table format without key (will be added by parent)
+                return $this->formatTableData($data, $level);
+            } else {
+                // List of non-uniform objects - output each one
+                foreach($data as $index => $item) {
+                    if(is_array($item)) {
+                        $output .= $indent . "- # item $index\n";
+                        foreach($item as $key => $value) {
+                            if(is_array($value) && !empty($value)) {
+                                if($this->isTableFormat($value)) {
+                                    $output .= $this->formatAsTable($key, $value, $level + 1);
+                                } else {
+                                    $output .= $indent . "  " . $this->escapeKey($key) . ":\n";
+                                    $output .= $this->toToonRecursive($value, $level + 2);
+                                }
+                            } else {
+                                $val = $this->formatSimpleValue($value);
+                                $output .= $indent . "  " . $this->escapeKey($key) . ": " . $val . "\n";
+                            }
+                        }
+                    } else {
+                        $output .= $indent . "- " . $this->formatSimpleValue($item) . "\n";
+                    }
+                }
+                return $output;
+            }
+        }
+        
+        // Handle associative arrays (objects)
         foreach($data as $key => $value) {
             
             if(is_array($value) && !empty($value)) {
@@ -4063,7 +4096,7 @@ README;
                 
             } else {
                 // Simple key-value pair
-                $val = $this->formatValue($value);
+                $val = $this->formatSimpleValue($value);
                 $output .= $indent . $this->escapeKey($key) . ": " . $val . "\n";
             }
         }
@@ -4095,7 +4128,36 @@ README;
     }
 
     /**
-     * Format array as TOON table
+     * Format array data as TOON table (without key)
+     */
+    protected function formatTableData($array, $level = 0) {
+        $indent = str_repeat('  ', $level);
+        $count = count($array);
+        $fields = array_keys($array[0]);
+        
+        // Header: [count]{field1,field2,...}:
+        $output = $indent . "[{$count}]{" . implode(',', array_map([$this, 'escapeKey'], $fields)) . "}:\n";
+        
+        // Rows: value1,value2,...
+        foreach($array as $row) {
+            $values = [];
+            foreach($fields as $field) {
+                $val = $row[$field];
+                // Handle nested arrays in table cells
+                if(is_array($val)) {
+                    $values[] = json_encode($val, JSON_UNESCAPED_UNICODE);
+                } else {
+                    $values[] = $this->formatSimpleValue($val);
+                }
+            }
+            $output .= $indent . implode(',', $values) . "\n";
+        }
+        
+        return $output;
+    }
+
+    /**
+     * Format array as TOON table (with key)
      */
     protected function formatAsTable($key, $array, $level = 0) {
         $indent = str_repeat('  ', $level);
@@ -4109,7 +4171,13 @@ README;
         foreach($array as $row) {
             $values = [];
             foreach($fields as $field) {
-                $values[] = $this->formatValue($row[$field]);
+                $val = $row[$field];
+                // Handle nested arrays in table cells
+                if(is_array($val)) {
+                    $values[] = json_encode($val, JSON_UNESCAPED_UNICODE);
+                } else {
+                    $values[] = $this->formatSimpleValue($val);
+                }
             }
             $output .= $indent . implode(',', $values) . "\n";
         }
@@ -4131,23 +4199,15 @@ README;
     /**
      * Format value for TOON
      */
-    protected function formatValue($value) {
+    /**
+     * Format simple (non-array) value for TOON
+     */
+    protected function formatSimpleValue($value) {
         // Null
         if(is_null($value)) return 'null';
         
         // Boolean
         if(is_bool($value)) return $value ? 'true' : 'false';
-        
-        // Array - convert to JSON-like representation
-        if(is_array($value)) {
-            if(empty($value)) return '[]';
-            // Simple array
-            if(isset($value[0])) {
-                return '[' . count($value) . ']';
-            }
-            // Associative array - represent as object
-            return '{' . count($value) . ' fields}';
-        }
         
         // Number
         if(is_numeric($value)) return $value;

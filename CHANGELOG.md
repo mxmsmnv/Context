@@ -5,6 +5,68 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2026-02-26
+
+### Fixed
+
+#### CRITICAL: TOON Format Data Loss
+- **Fixed data loss in TOON export** - Previous version was losing field data in templates
+- **Complete data preservation** - TOON now contains ALL data from JSON, just in different format
+- **Proper array handling** - Non-uniform arrays now properly exported with all their data
+- **Field details preserved** - All field properties (type, label, options, etc.) now in TOON
+
+**Before (WRONG):**
+```toon
+templates[60]{name,id,label,fields,fieldCount}:
+product,48,Product,[22],22
+```
+
+**After (CORRECT):**
+```toon
+templates[60]{name,id,label,fields,fieldCount}:
+- # item 0
+  name: product
+  id: 48
+  label: Product
+  fields:
+    - # item 0
+      name: brand
+      type: FieldtypePage
+      label: Brand
+    - # item 1
+      name: abv
+      type: FieldtypeText
+      label: "ABV, %"
+```
+
+### Changed
+
+#### TOON Export Logic
+- Rewrote `toToonRecursive()` method to handle indexed arrays correctly
+- Added `formatTableData()` method for table format without key
+- Split `formatValue()` into `formatSimpleValue()` for non-array values
+- Arrays in table cells now use JSON encoding to preserve nested data
+- Improved handling of non-uniform object arrays
+
+### Technical Details
+
+**Root Cause:**
+Original `formatValue()` was returning `[count]` for arrays instead of actual data, causing complete data loss for complex structures like template fields.
+
+**Solution:**
+1. Indexed arrays (lists) now properly iterate through items
+2. Each item's properties fully exported
+3. Table format only used when ALL items have identical keys
+4. Non-uniform arrays use list notation with `- # item N`
+
+**Files Affected:**
+- `toToonRecursive()` - Complete rewrite for array handling
+- `formatSimpleValue()` - New method for scalar values only
+- `formatTableData()` - New method for keyless table format
+- `formatAsTable()` - Updated to handle nested arrays in cells
+
+---
+
 ## [1.1.3] - 2026-02-26
 
 ### Added
