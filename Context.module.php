@@ -11,9 +11,6 @@
  * 
  * Supports JSON and TOON (Token-Oriented Object Notation) formats.
  * TOON format reduces token consumption by 30-60% for AI prompts.
- * 
- * @author Maxim Alex
- * @version 1.1.0
  */
 
 class Context extends Process implements Module, ConfigurableModule {
@@ -21,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.0', 
+            'version' => '1.1.2', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -423,16 +420,80 @@ class Context extends Process implements Module, ConfigurableModule {
                             $matrixFields = [];
                             foreach($matrixTemplate->getFields() as $matrixField) {
                                 if($matrixField instanceof Field) {
-                                    $matrixFields[] = [
+                                    // Полная информация о поле как для обычных полей
+                                    $matrixFieldData = [
                                         'name' => $matrixField->name,
                                         'type' => $matrixField->type->className(),
-                                        'label' => $matrixField->label
+                                        'label' => $matrixField->label,
+                                        'description' => $matrixField->description,
+                                        'notes' => $matrixField->notes,
+                                        'required' => $matrixField->required ? 1 : 0,
+                                        'columnWidth' => $matrixField->columnWidth
                                     ];
+                                    
+                                    // Опции для Page reference полей
+                                    if($matrixField->type->className() === 'FieldtypePage') {
+                                        $matrixFieldData['derefAsPage'] = $matrixField->derefAsPage;
+                                        if($matrixField->parent_id) {
+                                            $parent = $this->pages->get($matrixField->parent_id);
+                                            $matrixFieldData['parent'] = $parent ? $parent->path : '';
+                                        }
+                                        if($matrixField->template_id) {
+                                            $template = $this->templates->get($matrixField->template_id);
+                                            $matrixFieldData['template'] = $template ? $template->name : '';
+                                        }
+                                        if($matrixField->template_ids && is_array($matrixField->template_ids)) {
+                                            $matrixFieldData['templates'] = [];
+                                            foreach($matrixField->template_ids as $tid) {
+                                                $t = $this->templates->get($tid);
+                                                if($t) $matrixFieldData['templates'][] = $t->name;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Опции для Options полей
+                                    if($matrixField->type->className() === 'FieldtypeOptions') {
+                                        $matrixFieldData['options'] = [];
+                                        if($matrixField->type) {
+                                            $manager = $this->wire(new \SelectableOptionManager());
+                                            foreach($manager->setField($matrixField) as $option) {
+                                                $matrixFieldData['options'][] = [
+                                                    'id' => $option->id,
+                                                    'value' => $option->value,
+                                                    'title' => $option->title
+                                                ];
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Опции для Image/File полей
+                                    if(in_array($matrixField->type->className(), ['FieldtypeImage', 'FieldtypeFile'])) {
+                                        $matrixFieldData['maxFiles'] = $matrixField->maxFiles;
+                                        $matrixFieldData['extensions'] = $matrixField->extensions;
+                                        if($matrixField->type->className() === 'FieldtypeImage') {
+                                            $matrixFieldData['maxWidth'] = $matrixField->maxWidth;
+                                            $matrixFieldData['maxHeight'] = $matrixField->maxHeight;
+                                        }
+                                    }
+                                    
+                                    // Опции для текстовых полей
+                                    if(in_array($matrixField->type->className(), ['FieldtypeText', 'FieldtypeTextarea'])) {
+                                        $matrixFieldData['maxlength'] = $matrixField->maxlength;
+                                        if($matrixField->type->className() === 'FieldtypeTextarea') {
+                                            $matrixFieldData['rows'] = $matrixField->rows;
+                                            $matrixFieldData['contentType'] = $matrixField->contentType;
+                                        }
+                                    }
+                                    
+                                    $matrixFields[] = $matrixFieldData;
                                 }
                             }
                             $fieldData['matrixTypes'][] = [
                                 'name' => $matrixType->name,
                                 'label' => $matrixType->label,
+                                'head' => isset($matrixType->head) ? $matrixType->head : '',
+                                'sort' => isset($matrixType->sort) ? $matrixType->sort : 0,
+                                'template' => $matrixTemplate->name,
                                 'fields' => $matrixFields
                             ];
                         }
@@ -484,6 +545,574 @@ class Context extends Process implements Module, ConfigurableModule {
         }
 
         return $templates;
+    }
+
+    /**
+     * Export Repeater Matrix templates separately
+     */
+    protected function exportMatrixTemplates() {
+        $matrixTemplates = [];
+        
+        $this->log("Starting Matrix templates export...");
+        
+        // Find all Matrix fields first
+        $matrixFields = [];
+        foreach($this->fields as $field) {
+            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
+                $matrixFields[$field->name] = $field;
+            }
+        }
+        
+        if(empty($matrixFields)) {
+            $this->log("No Matrix fields found on this site");
+            return [];
+        }
+        
+        $this->log("Found " . count($matrixFields) . " Matrix fields: " . implode(', ', array_keys($matrixFields)));
+        
+        // Find all templates that could be Matrix types
+        // Matrix templates can have these patterns:
+        // 1. repeater_FIELDNAME (older style)
+        // 2. repeater_matrix_FIELDNAME_INDEX (newer style)
+        // 3. repeatermatrix_FIELDNAME_INDEX (alternative)
+        $allTemplates = $this->templates->getAll();
+        $potentialMatrixTemplates = [];
+        
+        foreach($allTemplates as $template) {
+            $name = $template->name;
+            
+            // Check if this template belongs to any Matrix field
+            foreach($matrixFields as $fieldName => $matrixField) {
+                $matched = false;
+                
+                // Pattern 1: repeater_FIELDNAME (exact match for parent repeater)
+                if($name === "repeater_{$fieldName}") {
+                    $matched = true;
+                }
+                // Pattern 2: repeater_matrix_FIELDNAME_*
+                elseif(strpos($name, "repeater_matrix_{$fieldName}") === 0) {
+                    $matched = true;
+                }
+                // Pattern 3: repeatermatrix_FIELDNAME_*
+                elseif(strpos($name, "repeatermatrix_{$fieldName}") === 0) {
+                    $matched = true;
+                }
+                // Pattern 4: Check if this template is listed in matrix types
+                else {
+                    try {
+                        $matrixTypes = $matrixField->type->getMatrixTypes($matrixField);
+                        foreach($matrixTypes as $mt) {
+                            if($mt->name === $name) {
+                                $matched = true;
+                                break;
+                            }
+                        }
+                    } catch(\Exception $e) {}
+                }
+                
+                if($matched) {
+                    $potentialMatrixTemplates[] = [
+                        'template' => $template,
+                        'field' => $matrixField
+                    ];
+                    break; // Found parent field, no need to check others
+                }
+            }
+        }
+        
+        if(empty($potentialMatrixTemplates)) {
+            $this->log("No Matrix templates found (no templates matching Matrix field patterns)");
+            return [];
+        }
+        
+        $this->log("Found " . count($potentialMatrixTemplates) . " potential Matrix templates");
+        
+        // Process each Matrix template
+        foreach($potentialMatrixTemplates as $item) {
+            $matrixTemplate = $item['template'];
+            $parentField = $item['field'];
+            
+            $this->log("Processing Matrix template: {$matrixTemplate->name} (field: {$parentField->name})");
+            
+            // Get matrix type label
+            $typeLabel = $matrixTemplate->label ?: $matrixTemplate->name;
+            
+            // Try to get proper label from matrix types
+            try {
+                $matrixTypes = $parentField->type->getMatrixTypes($parentField);
+                foreach($matrixTypes as $mt) {
+                    if($mt->name === $matrixTemplate->name) {
+                        $typeLabel = $mt->label;
+                        break;
+                    }
+                }
+            } catch(\Exception $e) {
+                $this->log("  Could not get matrix types for field {$parentField->name}: " . $e->getMessage());
+            }
+            
+            $matrixData = [
+                'name' => $matrixTemplate->name,
+                'label' => $typeLabel,
+                'parent_field' => $parentField->name,
+                'parent_field_label' => $parentField->label,
+                'fields' => []
+            ];
+            
+            // Export all fields from this matrix type
+            foreach($matrixTemplate->fields as $matrixField) {
+                if(!($matrixField instanceof Field)) continue;
+                
+                // Skip system fields
+                if($matrixField->name === 'repeater_matrix_type') continue;
+                
+                $fieldData = [
+                    'name' => $matrixField->name,
+                    'type' => $matrixField->type->className(),
+                    'label' => $matrixField->label,
+                    'description' => $matrixField->description,
+                    'notes' => $matrixField->notes,
+                    'required' => $matrixField->required ? 1 : 0,
+                    'columnWidth' => $matrixField->columnWidth,
+                    'collapsed' => $matrixField->collapsed !== Inputfield::collapsedNo ? $matrixField->collapsed : null,
+                ];
+                
+                // Page reference fields
+                if($matrixField->type instanceof FieldtypePage) {
+                    $fieldData['inputfield'] = $matrixField->inputfield;
+                    $fieldData['derefAsPage'] = $matrixField->derefAsPage;
+                    
+                    if($matrixField->parent_id) {
+                        $parent = $this->pages->get($matrixField->parent_id);
+                        $fieldData['parent'] = $parent ? $parent->path : '';
+                        $fieldData['parent_id'] = $matrixField->parent_id;
+                    }
+                    
+                    if($matrixField->template_id) {
+                        $template = $this->templates->get($matrixField->template_id);
+                        $fieldData['template'] = $template ? $template->name : '';
+                        $fieldData['template_id'] = $matrixField->template_id;
+                    }
+                    
+                    if($matrixField->template_ids && is_array($matrixField->template_ids)) {
+                        $fieldData['template_ids'] = $matrixField->template_ids;
+                        $fieldData['templates'] = [];
+                        foreach($matrixField->template_ids as $tid) {
+                            $t = $this->templates->get($tid);
+                            if($t) $fieldData['templates'][] = $t->name;
+                        }
+                    }
+                    
+                    if($matrixField->findPagesSelector) {
+                        $fieldData['selector'] = $matrixField->findPagesSelector;
+                    }
+                }
+                
+                // Options fields
+                if($matrixField->type instanceof FieldtypeOptions) {
+                    $fieldData['options'] = [];
+                    try {
+                        foreach($matrixField->type->getOptions($matrixField) as $option) {
+                            $fieldData['options'][] = [
+                                'id' => $option->id,
+                                'value' => $option->value,
+                                'title' => $option->title
+                            ];
+                        }
+                    } catch(\Exception $e) {}
+                }
+                
+                // Image/File fields
+                if($matrixField->type instanceof FieldtypeImage || $matrixField->type instanceof FieldtypeFile) {
+                    $fieldData['maxFiles'] = $matrixField->maxFiles;
+                    $fieldData['extensions'] = $matrixField->extensions;
+                    
+                    if($matrixField->type instanceof FieldtypeImage) {
+                        if($matrixField->maxWidth) $fieldData['maxWidth'] = $matrixField->maxWidth;
+                        if($matrixField->maxHeight) $fieldData['maxHeight'] = $matrixField->maxHeight;
+                    }
+                }
+                
+                // Text fields
+                if(in_array($matrixField->type->className(), ['FieldtypeText', 'FieldtypeTextarea'])) {
+                    if($matrixField->maxlength) $fieldData['maxlength'] = $matrixField->maxlength;
+                    
+                    if($matrixField->type->className() === 'FieldtypeTextarea') {
+                        $fieldData['rows'] = $matrixField->rows;
+                        $fieldData['contentType'] = $matrixField->contentType;
+                    }
+                }
+                
+                // Table fields
+                if($matrixField->type->className() === 'FieldtypeTable') {
+                    $fieldData['columns'] = [];
+                    
+                    // Table columns stored in field settings
+                    if(isset($matrixField->data) && is_array($matrixField->data)) {
+                        $maxCols = isset($matrixField->data['maxCols']) ? (int)$matrixField->data['maxCols'] : 0;
+                        
+                        for($i = 1; $i <= $maxCols; $i++) {
+                            $colName = isset($matrixField->data["col{$i}name"]) ? $matrixField->data["col{$i}name"] : null;
+                            $colLabel = isset($matrixField->data["col{$i}label"]) ? $matrixField->data["col{$i}label"] : null;
+                            $colType = isset($matrixField->data["col{$i}type"]) ? $matrixField->data["col{$i}type"] : null;
+                            
+                            if($colName) {
+                                $column = [
+                                    'name' => $colName,
+                                    'label' => $colLabel ?: $colName,
+                                    'type' => $colType ?: 'text'
+                                ];
+                                
+                                // Add column options if they exist
+                                if(isset($matrixField->data["col{$i}options"]) && !empty($matrixField->data["col{$i}options"])) {
+                                    $options = $matrixField->data["col{$i}options"];
+                                    if(is_string($options)) {
+                                        // Parse options string
+                                        $column['options'] = [];
+                                        $lines = explode("\n", $options);
+                                        foreach($lines as $line) {
+                                            $line = trim($line);
+                                            if(empty($line)) continue;
+                                            
+                                            if(strpos($line, '=') !== false) {
+                                                list($key, $value) = explode('=', $line, 2);
+                                                $column['options'][trim($key)] = trim($value);
+                                            } else {
+                                                $column['options'][] = $line;
+                                            }
+                                        }
+                                    } elseif(is_array($options)) {
+                                        $column['options'] = $options;
+                                    }
+                                }
+                                
+                                // Add selector for page fields
+                                if(isset($matrixField->data["col{$i}selector"]) && !empty($matrixField->data["col{$i}selector"])) {
+                                    $column['selector'] = $matrixField->data["col{$i}selector"];
+                                }
+                                
+                                $fieldData['columns'][] = $column;
+                            }
+                        }
+                    }
+                }
+                
+                // Combo fields (ProFields)
+                if($matrixField->type->className() === 'FieldtypeCombo') {
+                    $fieldData['subfields'] = [];
+                    
+                    if(isset($matrixField->data) && is_array($matrixField->data)) {
+                        $qty = isset($matrixField->data['qty']) ? (int)$matrixField->data['qty'] : 0;
+                        
+                        // Check if there's an order specified
+                        $order = [];
+                        if(isset($matrixField->data['order']) && !empty($matrixField->data['order'])) {
+                            $order = explode(',', $matrixField->data['order']);
+                        }
+                        
+                        if(!empty($order)) {
+                            // Use order array - it contains indices like ['1', '2', '3']
+                            foreach($order as $index) {
+                                $index = trim($index);
+                                if(empty($index)) continue;
+                                
+                                $nameKey = "i{$index}_name";
+                                $labelKey = "i{$index}_label";
+                                $typeKey = "i{$index}_type";
+                                
+                                if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
+                                    $subfield = [
+                                        'name' => $matrixField->data[$nameKey],
+                                        'label' => isset($matrixField->data[$labelKey]) ? $matrixField->data[$labelKey] : $matrixField->data[$nameKey],
+                                        'type' => $matrixField->data[$typeKey]
+                                    ];
+                                    
+                                    // Add notes and description
+                                    $notesKey = "i{$index}_notes";
+                                    $descriptionKey = "i{$index}_description";
+                                    
+                                    if(isset($matrixField->data[$notesKey]) && !empty($matrixField->data[$notesKey])) {
+                                        $subfield['notes'] = $matrixField->data[$notesKey];
+                                    }
+                                    if(isset($matrixField->data[$descriptionKey]) && !empty($matrixField->data[$descriptionKey])) {
+                                        $subfield['description'] = $matrixField->data[$descriptionKey];
+                                    }
+                                    
+                                    // Add options if available
+                                    $optionsKey = "i{$index}_options";
+                                    if(isset($matrixField->data[$optionsKey]) && !empty($matrixField->data[$optionsKey])) {
+                                        $options = $matrixField->data[$optionsKey];
+                                        if(is_string($options)) {
+                                            $subfield['options'] = [];
+                                            $lines = explode("\n", $options);
+                                            foreach($lines as $line) {
+                                                $line = trim($line);
+                                                if(empty($line)) continue;
+                                                
+                                                if(strpos($line, '=') !== false) {
+                                                    list($key, $value) = explode('=', $line, 2);
+                                                    $subfield['options'][trim($key)] = trim($value);
+                                                } else {
+                                                    $subfield['options'][] = $line;
+                                                }
+                                            }
+                                        } elseif(is_array($options)) {
+                                            $subfield['options'] = $options;
+                                        }
+                                    }
+                                    
+                                    $fieldData['subfields'][] = $subfield;
+                                }
+                            }
+                        } else {
+                            // No order specified, iterate by index
+                            for($i = 1; $i <= $qty; $i++) {
+                                $nameKey = "i{$i}_name";
+                                $labelKey = "i{$i}_label";
+                                $typeKey = "i{$i}_type";
+                                
+                                if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
+                                    $subfield = [
+                                        'name' => $matrixField->data[$nameKey],
+                                        'label' => isset($matrixField->data[$labelKey]) ? $matrixField->data[$labelKey] : $matrixField->data[$nameKey],
+                                        'type' => $matrixField->data[$typeKey]
+                                    ];
+                                    
+                                    // Add notes and description
+                                    $notesKey = "i{$i}_notes";
+                                    $descriptionKey = "i{$i}_description";
+                                    
+                                    if(isset($matrixField->data[$notesKey]) && !empty($matrixField->data[$notesKey])) {
+                                        $subfield['notes'] = $matrixField->data[$notesKey];
+                                    }
+                                    if(isset($matrixField->data[$descriptionKey]) && !empty($matrixField->data[$descriptionKey])) {
+                                        $subfield['description'] = $matrixField->data[$descriptionKey];
+                                    }
+                                    
+                                    // Add options if available
+                                    $optionsKey = "i{$i}_options";
+                                    if(isset($matrixField->data[$optionsKey]) && !empty($matrixField->data[$optionsKey])) {
+                                        $options = $matrixField->data[$optionsKey];
+                                        if(is_string($options)) {
+                                            $subfield['options'] = [];
+                                            $lines = explode("\n", $options);
+                                            foreach($lines as $line) {
+                                                $line = trim($line);
+                                                if(empty($line)) continue;
+                                                
+                                                if(strpos($line, '=') !== false) {
+                                                    list($key, $value) = explode('=', $line, 2);
+                                                    $subfield['options'][trim($key)] = trim($value);
+                                                } else {
+                                                    $subfield['options'][] = $line;
+                                                }
+                                            }
+                                        } elseif(is_array($options)) {
+                                            $subfield['options'] = $options;
+                                        }
+                                    }
+                                    
+                                    $fieldData['subfields'][] = $subfield;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                $matrixData['fields'][] = $fieldData;
+            }
+            
+            $matrixTemplates[] = $matrixData;
+            $this->log("  Added matrix type: {$matrixTemplate->name} with " . count($matrixData['fields']) . " fields");
+        }
+        
+        // Export if there are any matrix templates
+        if(!empty($matrixTemplates)) {
+            $aiPath = $this->getContextPath();
+            
+            $this->log("Exporting " . count($matrixTemplates) . " Matrix templates");
+            
+            // JSON format
+            file_put_contents(
+                $aiPath . 'matrix-templates.json', 
+                json_encode(['matrix_templates' => $matrixTemplates], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
+            );
+            
+            $this->log("Created matrix-templates.json");
+            
+            // TOON format (if enabled)
+            if($this->export_toon_format) {
+                file_put_contents(
+                    $aiPath . 'matrix-templates.toon', 
+                    $this->convertToToon(['matrix_templates' => $matrixTemplates])
+                );
+                $this->log("Created matrix-templates.toon");
+            }
+        } else {
+            $this->log("No Matrix templates found to export");
+        }
+        
+        return $matrixTemplates;
+    }
+
+    /**
+     * Export complete site tree (structure + templates + fields)
+     * Technical overview without data - just the architecture
+     */
+    protected function exportTree() {
+        $tree = [
+            'site' => [
+                'name' => $this->config->httpHost,
+                'root' => '/',
+                'templates' => []
+            ]
+        ];
+        
+        $this->log("Building complete site tree...");
+        
+        // Get all templates with their fields
+        foreach($this->templates as $template) {
+            if($template->flags & Template::flagSystem) continue;
+            
+            $templateData = [
+                'name' => $template->name,
+                'label' => $template->label ?: $template->name,
+                'id' => $template->id,
+                'fields' => [],
+                'pages_count' => $this->pages->count("template={$template->name}")
+            ];
+            
+            // Add all fields
+            foreach($template->fields as $field) {
+                $fieldData = [
+                    'name' => $field->name,
+                    'type' => $field->type->className(),
+                    'label' => $field->label
+                ];
+                
+                // Add subfield info for special types
+                if($field->type instanceof FieldtypePage) {
+                    $fieldData['references'] = 'Page';
+                    if($field->template_id) {
+                        $refTemplate = $this->templates->get($field->template_id);
+                        if($refTemplate) $fieldData['references_template'] = $refTemplate->name;
+                    }
+                } elseif($field->type->className() === 'FieldtypeRepeater') {
+                    $fieldData['repeater'] = true;
+                    // Get repeater template
+                    $repeaterTemplate = $this->templates->get("name=repeater_{$field->name}");
+                    if($repeaterTemplate) {
+                        $fieldData['subfields'] = [];
+                        foreach($repeaterTemplate->fields as $repField) {
+                            $fieldData['subfields'][] = [
+                                'name' => $repField->name,
+                                'type' => $repField->type->className(),
+                                'label' => $repField->label
+                            ];
+                        }
+                    }
+                } elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
+                    $fieldData['matrix'] = true;
+                    $fieldData['matrix_types'] = [];
+                    
+                    // Find all matrix templates for this field
+                    $allTemplates = $this->templates->getAll();
+                    foreach($allTemplates as $t) {
+                        if(strpos($t->name, "repeater_{$field->name}") === 0 || 
+                           strpos($t->name, "repeater_matrix_{$field->name}") === 0 ||
+                           strpos($t->name, "repeatermatrix_{$field->name}") === 0) {
+                            
+                            $matrixType = [
+                                'name' => $t->name,
+                                'label' => $t->label ?: $t->name,
+                                'subfields' => []
+                            ];
+                            
+                            foreach($t->fields as $matrixField) {
+                                if($matrixField->name === 'repeater_matrix_type') continue;
+                                $matrixType['subfields'][] = [
+                                    'name' => $matrixField->name,
+                                    'type' => $matrixField->type->className(),
+                                    'label' => $matrixField->label
+                                ];
+                            }
+                            
+                            $fieldData['matrix_types'][] = $matrixType;
+                        }
+                    }
+                } elseif($field->type->className() === 'FieldtypeTable') {
+                    $fieldData['table'] = true;
+                    $fieldData['columns'] = [];
+                    if(isset($field->data) && is_array($field->data)) {
+                        $maxCols = isset($field->data['maxCols']) ? (int)$field->data['maxCols'] : 0;
+                        for($i = 1; $i <= $maxCols; $i++) {
+                            $colName = isset($field->data["col{$i}name"]) ? $field->data["col{$i}name"] : null;
+                            if($colName) {
+                                $fieldData['columns'][] = [
+                                    'name' => $colName,
+                                    'type' => isset($field->data["col{$i}type"]) ? $field->data["col{$i}type"] : 'text'
+                                ];
+                            }
+                        }
+                    }
+                } elseif($field->type->className() === 'FieldtypeCombo') {
+                    $fieldData['combo'] = true;
+                    $fieldData['subfields'] = [];
+                    if(isset($field->data) && is_array($field->data)) {
+                        $qty = isset($field->data['qty']) ? (int)$field->data['qty'] : 0;
+                        for($i = 1; $i <= $qty; $i++) {
+                            $nameKey = "i{$i}_name";
+                            $typeKey = "i{$i}_type";
+                            if(isset($field->data[$nameKey]) && isset($field->data[$typeKey])) {
+                                $fieldData['subfields'][] = [
+                                    'name' => $field->data[$nameKey],
+                                    'type' => $field->data[$typeKey]
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                $templateData['fields'][] = $fieldData;
+            }
+            
+            $tree['site']['templates'][] = $templateData;
+        }
+        
+        // Add page structure overview
+        $this->log("Building page structure...");
+        $tree['structure'] = $this->buildTreeStructure($this->pages->get('/'));
+        
+        $this->log("Site tree built with " . count($tree['site']['templates']) . " templates");
+        
+        return $tree;
+    }
+    
+    /**
+     * Build tree structure recursively (template names only, no fields)
+     */
+    protected function buildTreeStructure($page, $depth = 0) {
+        if($depth >= $this->max_depth) return null;
+        
+        $node = [
+            'id' => $page->id,
+            'title' => $page->title,
+            'name' => $page->name,
+            'template' => $page->template->name,
+            'url' => $page->url
+        ];
+        
+        $children = $page->children("limit={$this->max_children}");
+        if($children->count()) {
+            $node['children'] = [];
+            foreach($children as $child) {
+                $childNode = $this->buildTreeStructure($child, $depth + 1);
+                if($childNode) {
+                    $node['children'][] = $childNode;
+                }
+            }
+        }
+        
+        return $node;
     }
 
     /**
@@ -616,14 +1245,96 @@ class Context extends Process implements Module, ConfigurableModule {
                             $itemData = [
                                 'id' => $repeaterItem->id
                             ];
-                            // For RepeaterMatrix add type
+                            
+                            // For RepeaterMatrix add type and label
                             if($field->type->className() === 'FieldtypeRepeaterMatrix') {
                                 $itemData['type'] = $repeaterItem->type;
+                                // Get matrix type label
+                                try {
+                                    $matrixTypes = $field->type->getMatrixTypes($field);
+                                    foreach($matrixTypes as $mt) {
+                                        if($mt->name === $repeaterItem->type) {
+                                            $itemData['type_label'] = $mt->label;
+                                            break;
+                                        }
+                                    }
+                                } catch(\Exception $e) {}
                             }
-                            // Export repeater item fields
+                            
+                            // Export repeater item fields with proper types
                             foreach($repeaterItem->fields as $repField) {
                                 $repValue = $repeaterItem->get($repField->name);
-                                if(!empty($repValue) || $repValue === '0' || $repValue === 0) {
+                                if(empty($repValue) && $repValue !== '0' && $repValue !== 0) continue;
+                                
+                                // Page reference in repeater
+                                if($repField->type instanceof FieldtypePage) {
+                                    if($repValue instanceof Page && $repValue->id) {
+                                        $itemData[$repField->name] = [
+                                            'id' => $repValue->id,
+                                            'title' => $repValue->title,
+                                            'url' => $repValue->url
+                                        ];
+                                    } elseif($repValue instanceof PageArray) {
+                                        $itemData[$repField->name] = [];
+                                        foreach($repValue as $p) {
+                                            $itemData[$repField->name][] = [
+                                                'id' => $p->id,
+                                                'title' => $p->title,
+                                                'url' => $p->url
+                                            ];
+                                        }
+                                    }
+                                }
+                                // Images in repeater
+                                elseif($repField->type instanceof FieldtypeImage) {
+                                    $images = [];
+                                    foreach($repValue as $img) {
+                                        $images[] = [
+                                            'url' => $img->url,
+                                            'description' => $img->description,
+                                            'width' => $img->width,
+                                            'height' => $img->height
+                                        ];
+                                    }
+                                    $itemData[$repField->name] = $images;
+                                }
+                                // Files in repeater
+                                elseif($repField->type instanceof FieldtypeFile) {
+                                    $files = [];
+                                    foreach($repValue as $file) {
+                                        $files[] = [
+                                            'url' => $file->url,
+                                            'basename' => $file->basename,
+                                            'filesize' => $file->filesize
+                                        ];
+                                    }
+                                    $itemData[$repField->name] = $files;
+                                }
+                                // Options in repeater
+                                elseif($repField->type instanceof FieldtypeOptions) {
+                                    if($repValue instanceof SelectableOption) {
+                                        $itemData[$repField->name] = [
+                                            'id' => $repValue->id,
+                                            'value' => $repValue->value,
+                                            'title' => $repValue->title
+                                        ];
+                                    } elseif($repValue instanceof SelectableOptionArray) {
+                                        $itemData[$repField->name] = [];
+                                        foreach($repValue as $opt) {
+                                            $itemData[$repField->name][] = [
+                                                'id' => $opt->id,
+                                                'value' => $opt->value,
+                                                'title' => $opt->title
+                                            ];
+                                        }
+                                    }
+                                }
+                                // Datetime in repeater
+                                elseif($repField->type instanceof FieldtypeDatetime) {
+                                    $itemData[$repField->name] = $repValue ? date('Y-m-d H:i:s', $repValue) : null;
+                                }
+                                // Everything else as string
+                                else {
                                     $itemData[$repField->name] = (string) $repValue;
                                 }
                             }
@@ -673,6 +1384,180 @@ class Context extends Process implements Module, ConfigurableModule {
         }
 
         return $allSamples;
+    }
+
+    /**
+     * Export samples for Matrix templates
+     */
+    protected function exportMatrixSamples() {
+        if(!$this->export_samples) return [];
+        
+        $samplesPath = $this->ensureFolder($this->getContextPath() . 'samples/');
+        $allMatrixSamples = [];
+        
+        // Find all Matrix fields
+        $matrixFields = [];
+        foreach($this->fields as $field) {
+            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
+                $matrixFields[] = $field;
+            }
+        }
+        
+        if(empty($matrixFields)) return [];
+        
+        $this->log("Exporting Matrix samples for " . count($matrixFields) . " fields");
+        
+        // For each Matrix field, find pages that use it
+        foreach($matrixFields as $matrixField) {
+            // Find templates that have this Matrix field
+            $templatesWithMatrix = [];
+            foreach($this->templates as $template) {
+                if($template->hasField($matrixField)) {
+                    $templatesWithMatrix[] = $template;
+                }
+            }
+            
+            if(empty($templatesWithMatrix)) continue;
+            
+            // Find pages with this template that have Matrix data
+            foreach($templatesWithMatrix as $template) {
+                $pages = $this->pages->find("template={$template->name}, {$matrixField->name}.count>0, limit={$this->samples_count}, sort=random");
+                
+                if(!$pages->count()) continue;
+                
+                foreach($pages as $page) {
+                    $matrixItems = $page->get($matrixField->name);
+                    if(!$matrixItems || !$matrixItems->count()) continue;
+                    
+                    foreach($matrixItems as $matrixItem) {
+                        // Get the matrix type template name
+                        $matrixTypeName = $matrixItem->template->name;
+                        
+                        if(!isset($allMatrixSamples[$matrixTypeName])) {
+                            $allMatrixSamples[$matrixTypeName] = [
+                                'template' => $matrixTypeName,
+                                'label' => $matrixItem->template->label ?: $matrixTypeName,
+                                'parent_field' => $matrixField->name,
+                                'parent_field_label' => $matrixField->label,
+                                'samples' => []
+                            ];
+                        }
+                        
+                        // Limit samples per matrix type
+                        if(count($allMatrixSamples[$matrixTypeName]['samples']) >= $this->samples_count) {
+                            continue;
+                        }
+                        
+                        $itemData = [
+                            'id' => $matrixItem->id,
+                            'type' => $matrixItem->type,
+                            'fields' => []
+                        ];
+                        
+                        // Export all fields from this matrix item
+                        foreach($matrixItem->template->fields as $itemField) {
+                            $value = $matrixItem->get($itemField->name);
+                            
+                            if(empty($value) && $value !== '0' && $value !== 0) continue;
+                            
+                            // Handle different field types (same as in exportSamples)
+                            if($itemField->type instanceof FieldtypePage) {
+                                if($value instanceof Page && $value->id) {
+                                    $itemData['fields'][$itemField->name] = [
+                                        'id' => $value->id,
+                                        'title' => $value->title,
+                                        'url' => $value->url
+                                    ];
+                                } elseif($value instanceof PageArray) {
+                                    $itemData['fields'][$itemField->name] = [];
+                                    foreach($value as $p) {
+                                        $itemData['fields'][$itemField->name][] = [
+                                            'id' => $p->id,
+                                            'title' => $p->title,
+                                            'url' => $p->url
+                                        ];
+                                    }
+                                }
+                            }
+                            elseif($itemField->type instanceof FieldtypeImage) {
+                                $images = [];
+                                foreach($value as $img) {
+                                    $images[] = [
+                                        'url' => $img->url,
+                                        'description' => $img->description,
+                                        'width' => $img->width,
+                                        'height' => $img->height
+                                    ];
+                                }
+                                $itemData['fields'][$itemField->name] = $images;
+                            }
+                            elseif($itemField->type instanceof FieldtypeFile) {
+                                $files = [];
+                                foreach($value as $file) {
+                                    $files[] = [
+                                        'url' => $file->url,
+                                        'basename' => $file->basename,
+                                        'filesize' => $file->filesize
+                                    ];
+                                }
+                                $itemData['fields'][$itemField->name] = $files;
+                            }
+                            elseif($itemField->type instanceof FieldtypeDatetime) {
+                                $itemData['fields'][$itemField->name] = $value ? date('Y-m-d H:i:s', $value) : null;
+                            }
+                            elseif($itemField->type->className() === 'FieldtypeTable') {
+                                $itemData['fields'][$itemField->name] = json_decode(json_encode($value), true);
+                            }
+                            elseif($itemField->type->className() === 'FieldtypeCombo') {
+                                $itemData['fields'][$itemField->name] = json_decode(json_encode($value), true);
+                            }
+                            elseif($itemField->type instanceof FieldtypeOptions) {
+                                if($value instanceof SelectableOption) {
+                                    $itemData['fields'][$itemField->name] = [
+                                        'id' => $value->id,
+                                        'value' => $value->value,
+                                        'title' => $value->title
+                                    ];
+                                } elseif($value instanceof SelectableOptionArray) {
+                                    $itemData['fields'][$itemField->name] = [];
+                                    foreach($value as $opt) {
+                                        $itemData['fields'][$itemField->name][] = [
+                                            'id' => $opt->id,
+                                            'value' => $opt->value,
+                                            'title' => $opt->title
+                                        ];
+                                    }
+                                }
+                            }
+                            else {
+                                if(is_array($value)) {
+                                    $itemData['fields'][$itemField->name] = $value;
+                                } else {
+                                    $itemData['fields'][$itemField->name] = (string) $value;
+                                }
+                            }
+                        }
+                        
+                        $allMatrixSamples[$matrixTypeName]['samples'][] = $itemData;
+                    }
+                }
+            }
+        }
+        
+        // Write individual Matrix template samples
+        foreach($allMatrixSamples as $matrixTypeName => $matrixSampleData) {
+            $filename = $samplesPath . "{$matrixTypeName}-samples.json";
+            file_put_contents($filename, json_encode($matrixSampleData['samples'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            
+            // TOON format (if enabled)
+            if($this->export_toon_format) {
+                file_put_contents($samplesPath . "{$matrixTypeName}-samples.toon", $this->convertToToon(['samples' => $matrixSampleData['samples']]));
+            }
+            
+            $this->log("Created samples for Matrix template: {$matrixTypeName} (" . count($matrixSampleData['samples']) . " samples)");
+        }
+        
+        return $allMatrixSamples;
     }
 
     /**
@@ -1867,6 +2752,8 @@ TOON;
 ├── templates.json                 # All templates with field definitions (JSON)
 ├── templates.toon                 # All templates with field definitions (TOON)
 ├── templates.csv                  # Templates export in CSV format
+├── matrix-templates.json          # Repeater Matrix field types (JSON) - if ProFields installed
+├── matrix-templates.toon          # Repeater Matrix field types (TOON) - if ProFields installed
 ├── config.json                    # Site configuration (JSON)
 ├── config.toon                    # Site configuration (TOON)
 ├── modules.json                   # Installed modules with versions (JSON)
@@ -1889,6 +2776,7 @@ STRUCTURE;
 ├── structure.txt                  # Page tree visualization (ASCII)
 ├── templates.json                 # All templates with field definitions
 ├── templates.csv                  # Templates export in CSV format
+├── matrix-templates.json          # Repeater Matrix field types (if ProFields installed)
 ├── config.json                    # Site configuration
 ├── modules.json                   # Installed modules with versions
 ├── classes.json                   # Custom page classes (/site/classes/)
@@ -2073,6 +2961,13 @@ Ask: "Create a custom Page class for [template] with methods to [purpose]"
 - Same data as templates.json but in CSV format
 - Easy to import into Excel, Google Sheets
 - **Use for**: Analysis, planning, sharing with stakeholders
+
+**matrix-templates.json** (if ProFields Repeater Matrix installed)
+- Detailed structure of all Repeater Matrix field types
+- Each matrix type with complete field definitions
+- Includes parent field information, labels, sort order
+- All field options, settings, and relationships
+- **Use for**: Understanding complex Matrix structures, AI-assisted Matrix development, documentation
 
 **config.json**
 - ProcessWire version, PHP version, database info
@@ -2276,6 +3171,19 @@ README;
             
             $templates = $this->exportTemplates();
             
+            // Export complete site tree (structure + templates + fields)
+            $this->message("🌳 Exporting complete site tree...");
+            $tree = $this->exportTree();
+            file_put_contents($aiPath . 'tree.json', json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            
+            // TOON format (if enabled)
+            if($this->export_toon_format) {
+                file_put_contents($aiPath . 'tree.toon', $this->convertToToon($tree));
+            }
+            
+            // Export Matrix templates separately
+            $this->exportMatrixTemplates();
+            
             // Export CSV version of templates
             $this->exportTemplatesToCSV();
             
@@ -2310,6 +3218,7 @@ README;
             if($this->export_samples) {
                 $this->message("📦 Exporting content samples...");
                 $this->exportSamples();
+                $this->exportMatrixSamples();
             }
             
             if($this->export_api_docs) {
@@ -2861,6 +3770,23 @@ README;
             ['classes.json', 'File', 'Custom page classes (JSON)'],
             ['README.md', 'File', 'Documentation']
         ];
+        
+        // Check if ProFields Repeater Matrix is installed
+        $hasMatrixFields = false;
+        foreach($this->fields as $field) {
+            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
+                $hasMatrixFields = true;
+                break;
+            }
+        }
+        
+        // Add matrix-templates if ProFields Matrix is used
+        if($hasMatrixFields) {
+            array_splice($coreFiles, 4, 0, [['matrix-templates.json', 'File', 'Repeater Matrix types (ProFields)']]);
+            if($this->export_toon_format) {
+                array_splice($coreFiles, 5, 0, [['matrix-templates.toon', 'File', 'Repeater Matrix types (TOON)']]);
+            }
+        }
         
         // Add TOON files if enabled
         if($this->export_toon_format) {

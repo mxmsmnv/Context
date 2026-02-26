@@ -126,22 +126,6 @@ title, body, author, and categories fields. Follow the
 existing patterns in templates.toon.
 ```
 
-## Screenshots
-
-### Module Admin Interface
-![Context Module Admin](https://placeholder.com/admin-interface.png)
-*Main dashboard showing export status, TOON format toggle, and file statistics*
-
-### TOON Format Comparison
-![Token Savings](https://placeholder.com/toon-comparison.png)
-*Real-world token savings comparison between JSON and TOON formats*
-
-### Configuration Options
-![Module Settings](https://placeholder.com/settings.png)
-*Comprehensive module settings including TOON export, site type, and optional features*
-
-> 📝 **Note:** Replace placeholder images with actual screenshots of your module in action
-
 ## Generated Files
 
 ### Directory Structure
@@ -149,6 +133,8 @@ existing patterns in templates.toon.
 ```
 /site/assets/context/
 ├── README.md                      # Documentation with format guide
+├── tree.json                      # Complete site structure (templates + fields + pages)
+├── tree.toon                      # Complete site structure (TOON - AI optimized!)
 ├── structure.json                 # Page tree (JSON)
 ├── structure.toon                 # Page tree (TOON - AI optimized!)
 ├── structure.txt                  # ASCII tree visualization

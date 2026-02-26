@@ -5,6 +5,41 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-02-26
+
+### Added
+
+#### Complete Site Tree Export
+- **New file: tree.json** - Complete technical site overview combining structure + templates + fields
+- **New file: tree.toon** - TOON format version for AI assistants
+- **Architecture visualization** - All templates with their fields, subfields, and relationships
+- **Page structure** - Complete page tree showing which template each page uses
+- **Field relationships** - Shows page references, repeater subfields, matrix types, table columns, combo subfields
+
+#### Tree Structure Features
+- Template information: name, label, ID, page count
+- Field types with nested structures:
+  - **Page references** - Shows which template is referenced
+  - **Repeaters** - Lists all subfields with types
+  - **Matrix** - All matrix types with their subfields
+  - **Table** - Column names and types
+  - **Combo** - Subfield names and types
+- Page hierarchy with template assignments
+- No data values - purely technical architecture
+
+**Use Cases:**
+- Upload single `tree.toon` file to AI for complete site understanding
+- Quick architecture overview without navigating multiple files
+- Perfect for AI assistants to understand site structure instantly
+- Combines best of `structure.json` and `templates.json` without redundancy
+
+### Changed
+- README.md: Removed Screenshots section
+- README.md: Added tree.json/tree.toon to file structure
+- Export flow: tree.json generated immediately after templates.json
+
+---
+
 ## [1.1.1] - 2026-02-26
 
 ### Fixed
