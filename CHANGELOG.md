@@ -5,6 +5,64 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2026-03-10
+
+### Fixed
+
+#### Critical Bug: getMatrixTypes() Array Handling
+- **Fixed:** "Attempt to read property 'name' on int" error (reported by @szabesz)
+- **Root Cause:** `getMatrixTypes()` returns associative array `['matrix_name' => id]`, not array of objects
+- **Solution:** Changed all iterations from `foreach($matrixTypes as $mt)` to `foreach($matrixTypes as $matrixName => $matrixId)`
+- **Affected Lines:** 414, 604, 643, 1352, 1748, 1957
+
+**Before (WRONG):**
+```php
+$matrixTypes = $field->type->getMatrixTypes($field);
+foreach($matrixTypes as $mt) {
+    if($mt->name === $name) { // ERROR: $mt is integer!
+```
+
+**After (CORRECT):**
+```php
+$matrixTypes = $field->type->getMatrixTypes($field);
+// $matrixTypes is ['matrix_name' => id] array
+foreach($matrixTypes as $matrixName => $matrixId) {
+    if($matrixName === $name) { // ✓ Correct
+```
+
+#### Module Configuration Defaults Not Applied
+- **Fixed:** Default settings not applied on first install (reported by @szabesz)
+- **Root Cause:** `$configDefaults` only used in config form, not on module instantiation
+- **Solution:** Added `__construct()` method to apply defaults
+- **Affected Settings:** All checkboxes (export_samples, export_api_docs, export_toon_format, etc.)
+
+**Before:** User had to click "Submit" after install to activate default settings  
+**After:** Defaults applied immediately on module install
+
+### Changed
+
+#### Error Handling Improvements
+- Added comments explaining `getMatrixTypes()` return structure in all locations
+- Improved label retrieval: fetch template object to get label instead of trying to access non-existent property
+- More robust error handling with try-catch blocks around matrix type operations
+
+### Technical Details
+
+**Files Modified:**
+- 6 locations with `getMatrixTypes()` calls fixed
+- Added `__construct()` method for default configuration
+- Added inline documentation for array structure
+
+**Locations Fixed:**
+1. Line ~414: exportTemplates() - Matrix types in template export
+2. Line ~604: exportMatrixTemplates() - Pattern 4 detection
+3. Line ~643: exportMatrixTemplates() - Getting matrix type labels
+4. Line ~1352: exportSamples() - Matrix type labels in samples
+5. Line ~1748: exportApiDocs() - API schema generation
+6. Line ~1957: exportFieldDefinitions() - Field definitions export
+
+---
+
 ## [1.1.4] - 2026-02-26
 
 ### Fixed

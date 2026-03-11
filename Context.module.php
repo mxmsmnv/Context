@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.4', 
+            'version' => '1.1.5', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -53,6 +53,15 @@ class Context extends Process implements Module, ConfigurableModule {
         'site_type' => 'generic',
         'custom_ai_instructions' => ''
     ];
+
+    /**
+     * Constructor - apply default values
+     */
+    public function __construct() {
+        foreach(self::$configDefaults as $key => $value) {
+            $this->$key = $value;
+        }
+    }
 
     /**
      * Module initialization
@@ -412,10 +421,10 @@ class Context extends Process implements Module, ConfigurableModule {
                 if($field->type->className() === 'FieldtypeRepeaterMatrix') {
                     $fieldData['matrixTypes'] = [];
                     $matrixTypes = $field->type->getMatrixTypes($field);
-                    foreach($matrixTypes as $matrixType) {
-                        if(!isset($matrixType->name)) continue;
+                    // $matrixTypes is ['matrix_name' => id] array
+                    foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
                         
-                        $matrixTemplate = $this->wire('templates')->get($matrixType->name);
+                        $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
                         if($matrixTemplate && $matrixTemplate instanceof Template) {
                             $matrixFields = [];
                             foreach($matrixTemplate->getFields() as $matrixField) {
@@ -601,8 +610,9 @@ class Context extends Process implements Module, ConfigurableModule {
                 else {
                     try {
                         $matrixTypes = $matrixField->type->getMatrixTypes($matrixField);
-                        foreach($matrixTypes as $mt) {
-                            if($mt->name === $name) {
+                        // $matrixTypes is ['matrix_name' => id] array
+                        foreach($matrixTypes as $matrixName => $matrixId) {
+                            if($matrixName === $name) {
                                 $matched = true;
                                 break;
                             }
@@ -640,9 +650,14 @@ class Context extends Process implements Module, ConfigurableModule {
             // Try to get proper label from matrix types
             try {
                 $matrixTypes = $parentField->type->getMatrixTypes($parentField);
-                foreach($matrixTypes as $mt) {
-                    if($mt->name === $matrixTemplate->name) {
-                        $typeLabel = $mt->label;
+                // $matrixTypes is ['matrix_name' => id] array
+                foreach($matrixTypes as $matrixName => $matrixId) {
+                    if($matrixName === $matrixTemplate->name) {
+                        // Get template to access its label
+                        $mt = $this->templates->get($matrixName);
+                        if($mt) {
+                            $typeLabel = $mt->label ?: $matrixName;
+                        }
                         break;
                     }
                 }
@@ -1344,9 +1359,12 @@ class Context extends Process implements Module, ConfigurableModule {
                                 // Get matrix type label
                                 try {
                                     $matrixTypes = $field->type->getMatrixTypes($field);
-                                    foreach($matrixTypes as $mt) {
-                                        if($mt->name === $repeaterItem->type) {
-                                            $itemData['type_label'] = $mt->label;
+                                    // $matrixTypes is ['matrix_name' => id] array
+                                    foreach($matrixTypes as $matrixName => $matrixId) {
+                                        if($matrixName === $repeaterItem->type) {
+                                            // Get template to access label
+                                            $mt = $this->templates->get($matrixName);
+                                            $itemData['type_label'] = $mt ? ($mt->label ?: $matrixName) : $matrixName;
                                             break;
                                         }
                                     }
@@ -1736,18 +1754,18 @@ class Context extends Process implements Module, ConfigurableModule {
                     $property['items'] = [
                         'oneOf' => []
                     ];
-                    foreach($matrixTypes as $matrixType) {
-                        if(!isset($matrixType->name)) continue;
+                    // $matrixTypes is ['matrix_name' => id] array
+                    foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
                         
-                        $matrixTemplate = $this->wire('templates')->get($matrixType->name);
+                        $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
                         if($matrixTemplate && $matrixTemplate instanceof Template) {
                             $matrixSchema = [
                                 'type' => 'object',
                                 'properties' => [
                                     'type' => [
                                         'type' => 'string',
-                                        'const' => $matrixType->name,
-                                        'description' => $matrixType->label
+                                        'const' => $matrixTypeName,
+                                        'description' => $matrixTemplate->label ?: $matrixTypeName
                                     ]
                                 ],
                                 'required' => ['type']
@@ -1945,10 +1963,10 @@ class Context extends Process implements Module, ConfigurableModule {
                 ];
 
                 $matrixTypes = $field->type->getMatrixTypes($field);
-                foreach($matrixTypes as $matrixType) {
-                    if(!isset($matrixType->name)) continue;
+                // $matrixTypes is ['matrix_name' => id] array
+                foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
                     
-                    $matrixTemplate = $this->wire('templates')->get($matrixType->name);
+                    $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
                     if($matrixTemplate && $matrixTemplate instanceof Template) {
                         $matrixFields = [];
                         foreach($matrixTemplate->getFields() as $matrixField) {
