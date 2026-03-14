@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.5', 
+            'version' => '1.1.6', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -51,7 +51,8 @@ class Context extends Process implements Module, ConfigurableModule {
         'compact_mode' => 0,
         'auto_update' => 0,
         'site_type' => 'generic',
-        'custom_ai_instructions' => ''
+        'custom_ai_instructions' => '',
+        'export_path' => 'site/assets/cache/context/'
     ];
 
     /**
@@ -110,7 +111,19 @@ class Context extends Process implements Module, ConfigurableModule {
     }
 
     protected function getContextPath() {
-        return $this->config->paths->assets . 'context/';
+        $path = $this->export_path ?: 'site/assets/cache/context/';
+        
+        // Check if absolute path (starts with /)
+        if(strpos($path, '/') === 0) {
+            // Absolute path - use as-is
+            return rtrim($path, '/') . '/';
+        }
+        
+        // Normalize relative path - remove leading/trailing slashes
+        $path = trim($path, '/');
+        
+        // Relative path - add to PW root
+        return $this->config->paths->root . $path . '/';
     }
 
     protected function ensureFolder($path) {
@@ -119,6 +132,16 @@ class Context extends Process implements Module, ConfigurableModule {
                 throw new WireException("Cannot create folder: $path");
             }
         }
+        
+        // Always ensure .htaccess exists for protection
+        $htaccess = $path . '.htaccess';
+        if(!file_exists($htaccess)) {
+            $content = "# Deny access to Context exports\n";
+            $content .= "# Remove this file if you need public access\n";
+            $content .= "Deny from all\n";
+            file_put_contents($htaccess, $content);
+        }
+        
         return $path;
     }
 
@@ -4287,6 +4310,23 @@ README;
         $f->addOption('catalog', 'Catalog / Directory / Listings — Brands, categories, hierarchical data');
         
         $f->value = $data['site_type'];
+        $fieldset->add($f);
+
+        $inputfields->add($fieldset);
+
+        // Export Path Configuration
+        $fieldset = $modules->get('InputfieldFieldset');
+        $fieldset->label = 'Export Path';
+        $fieldset->description = 'Configure where context files are exported';
+        $fieldset->collapsed = Inputfield::collapsedNo;
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'export_path';
+        $f->label = 'Export Directory Path';
+        $f->description = 'Path where context files will be exported. Default: site/assets/cache/context/ (protected by ProcessWire)';
+        $f->notes = 'Examples: site/assets/cache/context/ (default, PW protected) | .junie/skills/docs (for Junie AI) | site/assets/context/ (custom path with .htaccess)';
+        $f->value = $data['export_path'];
+        $f->columnWidth = 100;
         $fieldset->add($f);
 
         $inputfields->add($fieldset);

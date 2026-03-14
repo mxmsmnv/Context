@@ -5,6 +5,118 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2026-03-14
+
+### Added
+
+#### Configurable Export Path
+- **New setting:** Export Path configuration in module settings (requested by @szabesz)
+- **Default path:** `site/assets/cache/context/` (protected by ProcessWire root .htaccess)
+- **Absolute paths supported:** `/home/user/context-exports/` (outside web root - most secure)
+- **Relative paths supported:** 
+  - `site/assets/cache/context/` (default, ProcessWire protected)
+  - `.junie/skills/docs` (for Junie AI agent in PHPStorm)
+  - `../../context-exports/` (relative to PW root)
+
+**Configuration:**
+```
+Setup → Modules → Context → Configure → Export Path
+```
+
+**Examples:**
+- `site/assets/cache/context/` (default, ProcessWire .htaccess protected)
+- `/home/user/context-exports/` (absolute path, outside web root - recommended)
+- `.junie/skills/docs` (for Junie AI integration)
+- `../../context-exports/` (two levels up from PW root)
+
+### Security
+
+#### Automatic .htaccess Protection
+- **Critical fix:** Export directory now protected by default (reported by @csaggo in GitHub issue #1)
+- **Default path changed:** From `site/assets/context/` to `site/assets/cache/context/`
+- **Triple protection strategy:**
+  1. **ProcessWire native:** `/site/assets/cache/` blocked in root .htaccess
+  2. **Local .htaccess:** Auto-created in export directory as fallback
+  3. **Outside web root:** Absolute paths like `/home/user/context-exports/` (recommended for Nginx)
+
+**.htaccess content:**
+```apache
+# Deny access to Context exports
+# Remove this file if you need public access
+Deny from all
+```
+
+**Important for Nginx users:**
+- `.htaccess` files don't work on Nginx servers
+- **Recommended solution:** Use absolute path outside web root (e.g. `/home/user/context-exports/`)
+- **Alternative:** Add to nginx config:
+  ```nginx
+  location ~ ^/site/assets/cache/context/ {
+      deny all;
+      return 403;
+  }
+  ```
+
+**Security notes:**
+- Versions < 1.1.6 used `site/assets/context/` which was NOT protected
+- Version 1.1.6+ uses `site/assets/cache/context/` (ProcessWire protected)
+- For maximum security on Nginx: use absolute path outside web root
+- `.htaccess` created as backup protection for Apache servers
+
+### Changed
+
+#### Path Handling
+- `getContextPath()` now supports absolute paths (starting with `/`)
+- Absolute paths: Used as-is without modification
+- Relative paths: Added to ProcessWire root directory
+- Path normalization: Handles `../` correctly for relative paths
+
+**Path Resolution Examples:**
+- `/home/user/exports/` → `/home/user/exports/` (absolute, used as-is)
+- `site/assets/cache/context/` → `/var/www/site/assets/cache/context/` (relative to PW root)
+- `../../exports/` → `/var/www/../exports/` → `/var/exports/` (relative, normalized)
+
+#### Directory Creation
+- `ensureFolder()` creates `.htaccess` automatically in ALL directories
+- Protection applied even if directory already exists
+- Subdirectories (samples/, api/, prompts/) get individual .htaccess files
+
+### Fixed
+
+#### Absolute Path Support
+- Fixed: Absolute paths were incorrectly treated as relative
+- Fixed: Leading `/` was stripped, causing paths to be relative to PW root
+- Solution: Check for leading `/` before path normalization
+
+### Technical Details
+
+**New Configuration:**
+- `export_path` setting (default: `site/assets/cache/context/`)
+- Supports both absolute and relative paths
+- Accessible via module configuration UI
+
+**Modified Methods:**
+- `getContextPath()` - Detects absolute vs relative paths, handles both correctly
+- `ensureFolder()` - Creates .htaccess even if folder exists
+
+**Files Created:**
+- `.htaccess` in export directory (automatic, Apache only)
+- `.htaccess` in all subdirectories (samples/, api/, etc.)
+
+**Migration for Existing Users:**
+1. Update module to v1.1.6
+2. **Apache servers:** Change path to `site/assets/cache/context/` in settings (protected by ProcessWire)
+3. **Nginx servers:** Use absolute path like `/home/user/context-exports/` (outside web root)
+4. Re-export to create new directory structure
+5. Delete old `/site/assets/context/` directory if it exists
+
+**Server-Specific Recommendations:**
+- **Apache:** `site/assets/cache/context/` (default, works out of box)
+- **Nginx:** `/home/user/context-exports/` (absolute path outside htdocs)
+- **CloudPanel/Similar:** Absolute path recommended as .htaccess may not work
+
+---
+
 ## [1.1.5] - 2026-03-10
 
 ### Fixed

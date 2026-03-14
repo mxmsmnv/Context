@@ -386,9 +386,33 @@ Choose your site type to get customized code snippets:
 
 ### Security
 
-- Exports are stored in `/site/assets/` (protected by ProcessWire)
-- No sensitive data (passwords, API keys) is exported
-- Only accessible to logged-in superusers by default
+- **Default path protected by ProcessWire** - `site/assets/cache/context/` blocked in root .htaccess (Apache)
+- **Absolute paths supported** - Use `/home/user/context-exports/` to store files outside web root (recommended for Nginx)
+- **Triple protection system:**
+  1. ProcessWire native protection for `/site/assets/cache/` (Apache only)
+  2. Local `.htaccess` auto-created as backup (Apache only)
+  3. Absolute paths outside web root (works on both Apache and Nginx)
+- **Configurable export path** - Set custom location in module settings
+- **No sensitive data exported** - No passwords, API keys, or credentials
+- **Superuser access only** - Module accessible only to logged-in superusers
+
+**Server-Specific Setup:**
+
+**Apache (HestiaCP, cPanel, etc.):**
+- Default path `site/assets/cache/context/` works out of the box
+- ProcessWire .htaccess + local .htaccess provide protection
+
+**Nginx (CloudPanel, etc.):**
+- Use absolute path outside web root: `/home/user/context-exports/`
+- Or add to nginx config:
+  ```nginx
+  location ~ ^/site/assets/cache/context/ {
+      deny all;
+      return 403;
+  }
+  ```
+
+**Important:** Update to v1.1.6+ for proper security. Versions < 1.1.6 used unprotected `site/assets/context/` path.
 
 ### TOON Format Details
 
@@ -401,8 +425,15 @@ Choose your site type to get customized code snippets:
 ### File Locations
 
 - **Module**: `/site/modules/Context/`
-- **Exports**: `/site/assets/context/`
+- **Exports (default)**: `/site/assets/cache/context/` (ProcessWire protected, Apache only)
+- **Exports (Nginx)**: `/home/user/context-exports/` (absolute path, outside web root - recommended)
+- **Protection**: ProcessWire root .htaccess + local .htaccess (Apache) OR absolute path (Nginx)
 - **Snippets Library**: `/site/modules/Context/ContextSnippets.php`
+- **Custom paths**: Configure in Setup → Modules → Context → Export Path
+  - `site/assets/cache/context/` - default, ProcessWire protected (Apache)
+  - `/home/user/context-exports/` - absolute path outside web root (Apache + Nginx)
+  - `.junie/skills/docs` - for Junie AI integration
+  - `../../context-exports/` - relative path (two levels up)
 
 ## Format Comparison in Module Admin
 
@@ -473,4 +504,3 @@ MIT License - see LICENSE file for details
 - Website: [smnv.org](https://smnv.org)
 - Email: maxim@smnv.org
 - GitHub: [@mxmsmnv](https://github.com/mxmsmnv)
-
