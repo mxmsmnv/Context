@@ -5,6 +5,54 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2026-03-21
+
+### Added
+
+#### CSS Framework Selection
+- **New setting:** Manual CSS framework selection (requested by @psy)
+- **Options:** Auto-detect, Tailwind CSS, Bootstrap, UIkit, Vanilla CSS, None
+- **Default:** Auto-detect (scans templates and package.json)
+- **Use case:** Override auto-detection for custom/nested CSS or when detection is incorrect
+
+**Configuration:**
+```
+Setup → Modules → Context → Configure → CSS Framework
+```
+
+**Why this matters:**
+- Affects code examples and snippets generated for AI
+- Custom CSS users can now select "Vanilla CSS" instead of auto-detected Tailwind
+- More accurate context for AI when generating code
+
+### Changed
+
+#### Frontend Stack Detection
+- `detectFrontendStack()` now checks manual CSS setting before auto-detection
+- New helper method `detectJavaScriptFrameworks()` for detecting JS frameworks when CSS is manual
+- JavaScript frameworks (Alpine.js, HTMX, jQuery) are still auto-detected even when CSS is manually set
+
+### Technical Details
+
+**New Configuration:**
+- `css_framework` setting (default: `auto`)
+  - Options: auto, tailwind, bootstrap, uikit, vanilla, none
+  - Accessible via module configuration UI
+
+**Modified Methods:**
+- `detectFrontendStack()` - Now checks manual CSS setting before auto-detection
+- `detectJavaScriptFrameworks()` - New helper method for detecting JS frameworks when CSS is manual
+
+**How it works:**
+- When `css_framework` is set to anything other than `auto`:
+  - Uses the manually selected CSS framework
+  - Still auto-detects JavaScript frameworks (Alpine.js, HTMX, jQuery, etc.)
+  - Combines both in the final stack string
+- When `css_framework` is `auto` (default):
+  - Original behavior - detects everything automatically
+
+---
+
 ## [1.1.6] - 2026-03-14
 
 ### Added

@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.6', 
+            'version' => '1.1.7', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -52,7 +52,8 @@ class Context extends Process implements Module, ConfigurableModule {
         'auto_update' => 0,
         'site_type' => 'generic',
         'custom_ai_instructions' => '',
-        'export_path' => 'site/assets/cache/context/'
+        'export_path' => 'site/assets/cache/context/',
+        'css_framework' => 'auto'
     ];
 
     /**
@@ -3411,6 +3412,25 @@ README;
      * Detect frontend stack
      */
     protected function detectFrontendStack() {
+        // Check if manual CSS framework is set
+        if($this->css_framework && $this->css_framework !== 'auto') {
+            $frameworkMap = [
+                'tailwind' => 'Tailwind CSS',
+                'bootstrap' => 'Bootstrap',
+                'uikit' => 'UIkit',
+                'vanilla' => 'Vanilla CSS',
+                'none' => 'None'
+            ];
+            
+            $manualFramework = $frameworkMap[$this->css_framework] ?? 'Vanilla CSS';
+            
+            // Still detect JS frameworks
+            $jsStack = $this->detectJavaScriptFrameworks();
+            
+            return $manualFramework . ($jsStack ? ', ' . $jsStack : '');
+        }
+        
+        // Auto-detect (original logic)
         $stack = [];
         $rootDir = $this->config->paths->root;
         $templatesPath = $this->config->paths->templates;
@@ -3471,6 +3491,66 @@ README;
         }
 
         return !empty($stack) ? implode(', ', array_unique($stack)) : 'Vanilla HTML/PHP';
+    }
+    
+    /**
+     * Detect JavaScript frameworks only (helper for manual CSS selection)
+     */
+    protected function detectJavaScriptFrameworks() {
+        $stack = [];
+        $rootDir = $this->config->paths->root;
+        $templatesPath = $this->config->paths->templates;
+
+        // Check package.json for JS frameworks
+        if(file_exists($rootDir . 'package.json')) {
+            $pkg = json_decode(file_get_contents($rootDir . 'package.json'), true);
+            $deps = array_merge($pkg['dependencies'] ?? [], $pkg['devDependencies'] ?? []);
+            
+            $jsMap = [
+                'alpinejs' => 'Alpine.js',
+                'vue' => 'Vue.js',
+                'react' => 'React',
+                'htmx.org' => 'HTMX',
+                'jquery' => 'jQuery'
+            ];
+
+            foreach($jsMap as $key => $name) {
+                if(isset($deps[$key])) $stack[] = $name;
+            }
+        }
+
+        // Scan for JS framework signatures
+        $contentSample = "";
+        if(is_dir($templatesPath)) {
+            $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($templatesPath));
+            $count = 0;
+            foreach($files as $file) {
+                if($file->isDir()) continue;
+                if(in_array($file->getExtension(), ['php', 'inc', 'js'])) {
+                    $contentSample .= file_get_contents($file->getRealPath(), false, null, 0, 1024);
+                    $count++;
+                }
+                if($count > 50) break;
+            }
+        }
+
+        $jsSignatures = [
+            'Alpine.js' => ['x-data', 'x-init', 'x-on:', '@click'],
+            'HTMX' => ['hx-get', 'hx-post', 'hx-target', 'hx-swap'],
+            'jQuery' => ['$(document)', '$.ajax', 'jQuery(']
+        ];
+
+        foreach($jsSignatures as $name => $tokens) {
+            if(in_array($name, $stack)) continue;
+            foreach($tokens as $token) {
+                if(strpos($contentSample, $token) !== false) {
+                    $stack[] = $name;
+                    break;
+                }
+            }
+        }
+
+        return !empty($stack) ? implode(', ', array_unique($stack)) : '';
     }
 
     /**
@@ -4310,6 +4390,31 @@ README;
         $f->addOption('catalog', 'Catalog / Directory / Listings — Brands, categories, hierarchical data');
         
         $f->value = $data['site_type'];
+        $fieldset->add($f);
+
+        $inputfields->add($fieldset);
+
+        // CSS Framework Selection
+        $fieldset = $modules->get('InputfieldFieldset');
+        $fieldset->label = 'CSS Framework';
+        $fieldset->description = 'Choose your CSS framework for more accurate code generation';
+        $fieldset->collapsed = Inputfield::collapsedNo;
+
+        $f = $modules->get('InputfieldSelect');
+        $f->name = 'css_framework';
+        $f->label = 'CSS Framework';
+        $f->description = 'Select your CSS framework or use auto-detect';
+        
+        // Add options
+        $f->addOption('auto', 'Auto-detect (recommended)');
+        $f->addOption('tailwind', 'Tailwind CSS');
+        $f->addOption('bootstrap', 'Bootstrap');
+        $f->addOption('uikit', 'UIkit');
+        $f->addOption('vanilla', 'Vanilla CSS / Custom');
+        $f->addOption('none', 'None (no CSS framework)');
+        
+        $f->value = $data['css_framework'];
+        $f->notes = 'Auto-detect scans your templates and package.json. Choose manually if detection is incorrect.';
         $fieldset->add($f);
 
         $inputfields->add($fieldset);
