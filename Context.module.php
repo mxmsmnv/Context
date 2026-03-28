@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.7', 
+            'version' => '1.1.8', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -53,7 +53,8 @@ class Context extends Process implements Module, ConfigurableModule {
         'site_type' => 'generic',
         'custom_ai_instructions' => '',
         'export_path' => 'site/assets/cache/context/',
-        'css_framework' => 'auto'
+        'css_framework' => 'auto',
+        'generate_skill_md' => 1
     ];
 
     /**
@@ -1923,9 +1924,16 @@ class Context extends Process implements Module, ConfigurableModule {
 
             // Collect field type information
             if(!isset($definitions['field_types'][$className])) {
+                // Some fieldtypes use .info.php instead of getModuleInfo()
+                $label = $className;
+                if(method_exists($field->type, 'getModuleInfo')) {
+                    $moduleInfo = $field->type->getModuleInfo();
+                    $label = $moduleInfo['title'] ?? $className;
+                }
+                
                 $definitions['field_types'][$className] = [
                     'class' => $className,
-                    'label' => $field->type->getModuleInfo()['title'] ?? $className,
+                    'label' => $label,
                     'usage_count' => 0,
                     'examples' => []
                 ];
@@ -3277,6 +3285,140 @@ Use AI assistants effectively with complete site context! 🚀
 README;
     }
 
+    /**
+     * Create SKILL.md for AI agents (Cline, Junie, etc.)
+     */
+    protected function createSkillMd() {
+        $exportPath = $this->getContextPath();
+        $siteName = $this->config->httpHost;
+        
+        // Collect available files
+        $files = [];
+        
+        // Core files
+        if(file_exists($exportPath . 'config.json')) $files[] = '- **[config.json](./config.json)**: Site configuration';
+        if(file_exists($exportPath . 'templates.json')) $files[] = '- **[templates.json](./templates.json)**: All templates with field definitions';
+        if(file_exists($exportPath . 'templates.csv')) $files[] = '- **[templates.csv](./templates.csv)**: Templates export in CSV format';
+        if(file_exists($exportPath . 'structure.json')) $files[] = '- **[structure.json](./structure.json)**: Complete page tree (JSON)';
+        if(file_exists($exportPath . 'structure.txt')) $files[] = '- **[structure.txt](./structure.txt)**: Page tree visualization (ASCII)';
+        if(file_exists($exportPath . 'tree.json')) $files[] = '- **[tree.json](./tree.json)**: Combined structure with templates and fields';
+        if(file_exists($exportPath . 'modules.json')) $files[] = '- **[modules.json](./modules.json)**: Installed modules with versions';
+        if(file_exists($exportPath . 'matrix-templates.json')) $files[] = '- **[matrix-templates.json](./matrix-templates.json)**: Repeater Matrix field types';
+        if(file_exists($exportPath . 'README.md')) $files[] = '- **[README.md](./README.md)**: Source documentation and directory structure';
+        
+        // TOON files
+        if($this->export_toon_format) {
+            $toonFiles = [];
+            if(file_exists($exportPath . 'config.toon')) $toonFiles[] = '  - **[config.toon](./config.toon)**';
+            if(file_exists($exportPath . 'templates.toon')) $toonFiles[] = '  - **[templates.toon](./templates.toon)**';
+            if(file_exists($exportPath . 'structure.toon')) $toonFiles[] = '  - **[structure.toon](./structure.toon)**';
+            if(file_exists($exportPath . 'tree.toon')) $toonFiles[] = '  - **[tree.toon](./tree.toon)**';
+            if(file_exists($exportPath . 'modules.toon')) $toonFiles[] = '  - **[modules.toon](./modules.toon)**';
+            if(file_exists($exportPath . 'matrix-templates.toon')) $toonFiles[] = '  - **[matrix-templates.toon](./matrix-templates.toon)**';
+            
+            if(!empty($toonFiles)) {
+                $files[] = "\n- **TOON Format** (30-60% fewer tokens than JSON):";
+                $files = array_merge($files, $toonFiles);
+            }
+        }
+        
+        // Subdirectories
+        if(is_dir($exportPath . 'metadata/')) {
+            $files[] = "\n- **[metadata/](metadata/)**: Technical metadata";
+            if(file_exists($exportPath . 'metadata/field-definitions.json')) 
+                $files[] = '  - **[field-definitions.json](metadata/field-definitions.json)**: Detailed field information';
+            if(file_exists($exportPath . 'metadata/routes.json')) 
+                $files[] = '  - **[routes.json](metadata/routes.json)**: URL routing structure';
+        }
+        
+        if(is_dir($exportPath . 'api/')) {
+            $files[] = "\n- **[api/](api/)**: REST API schemas and examples";
+        }
+        
+        if(is_dir($exportPath . 'snippets/')) {
+            $files[] = "\n- **[snippets/](snippets/)**: Code library";
+            if(file_exists($exportPath . 'snippets/selectors.php')) 
+                $files[] = '  - **[selectors.php](snippets/selectors.php)**: Selector patterns for your site type';
+            if(file_exists($exportPath . 'snippets/helpers.php')) 
+                $files[] = '  - **[helpers.php](snippets/helpers.php)**: Utility functions';
+            if(file_exists($exportPath . 'snippets/api-examples.php')) 
+                $files[] = '  - **[api-examples.php](snippets/api-examples.php)**: API implementation examples';
+        }
+        
+        if(is_dir($exportPath . 'prompts/')) {
+            $files[] = "\n- **[prompts/](prompts/)**: AI prompts and instructions";
+        }
+        
+        if(is_dir($exportPath . 'samples/')) {
+            $files[] = "\n- **[samples/](samples/)**: Real content examples from live pages";
+        }
+        
+        $filesList = implode("\n", $files);
+        
+        return <<<SKILL
+---
+name: ProcessWire Context - {$siteName}
+description: Provides comprehensive context about the current ProcessWire project structure, fields, modules, and API snippets. Use this skill when the user asks about project structure, available fields, templates, or specific implementation details of the current site.
+---
+
+# ProcessWire Context - {$siteName}
+
+This skill provides a structured snapshot of the current ProcessWire project configuration. Use the provided resources to answer user queries accurately.
+
+## When to use this skill
+
+- User asks about project structure, templates, or fields
+- User needs to know available modules or their versions
+- User requests code examples or API usage patterns
+- User wants to understand the page tree or URL routing
+- User needs site configuration details
+
+## Steps
+
+1. **Analyze the request**: Determine what type of context is needed (templates, fields, routes, etc.)
+2. **Locate the resource**: Find the relevant file in the Resources section below
+3. **Read the content**: Extract the necessary data from the resource file
+4. **Formulate the answer**: Provide accurate information based strictly on the context
+
+## Resources
+
+The following files contain the project context:
+
+{$filesList}
+
+## Important Notes
+
+- **TOON format** files use 30-60% fewer tokens than JSON equivalents
+- All data is auto-generated from the live ProcessWire installation
+- Files are updated when templates, fields, or structure changes
+- Use specific files based on the query type:
+  - Structure questions → `structure.json` or `structure.txt`
+  - Template/field details → `templates.json` or `tree.json`
+  - Module information → `modules.json`
+  - Code examples → `snippets/` directory
+  - API schemas → `api/` directory
+
+## Examples
+
+**Q: "What templates are available in this project?"**  
+→ Read `templates.json` or `templates.csv`
+
+**Q: "Show me the page tree structure"**  
+→ Read `structure.txt` for ASCII visualization or `structure.json` for detailed JSON
+
+**Q: "What fields does the 'product' template have?"**  
+→ Read `templates.json` and find the 'product' template entry
+
+**Q: "Give me an example of using selectors in ProcessWire"**  
+→ Read `snippets/selectors.php`
+
+---
+
+**Generated by**: Context module for ProcessWire  
+**Site**: {$siteName}
+SKILL;
+    }
+
 
     /**
      * Main export function
@@ -3390,6 +3532,12 @@ README;
             
             // 3. README
             file_put_contents($aiPath . 'README.md', $this->createReadme());
+            
+            // Generate SKILL.md for AI agents (Cline, Junie, etc.)
+            if($this->generate_skill_md) {
+                $this->message("🤖 Generating SKILL.md for AI agents...");
+                file_put_contents($aiPath . 'SKILL.md', $this->createSkillMd());
+            }
             
             $duration = round(microtime(true) - $startTime, 2);
             
@@ -4449,6 +4597,15 @@ README;
         $f->notes = '**TOON format uses 30-60% fewer tokens** than JSON when uploaded to Claude, ChatGPT, or other LLMs. Highly recommended for AI development!';
         $f->icon = 'magic';
         $f->checked = $data['export_toon_format'] ? 'checked' : '';
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'generate_skill_md';
+        $f->label = 'Generate SKILL.md for AI Agents';
+        $f->description = 'Create SKILL.md file for Cline, Junie, and other AI coding agents';
+        $f->notes = 'Generates a structured skill file that helps AI agents understand how to use the exported context. Required for Cline (PHPStorm/VSCode) and Junie integration.';
+        $f->icon = 'robot';
+        $f->checked = $data['generate_skill_md'] ? 'checked' : '';
         $fieldset->add($f);
 
         $inputfields->add($fieldset);

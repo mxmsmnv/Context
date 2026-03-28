@@ -5,6 +5,82 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.8] - 2026-03-21
+
+### Added
+
+#### SKILL.md Auto-Generation for AI Agents
+- **New feature:** Automatic SKILL.md generation for AI coding agents (requested by @szabesz)
+- **Supported agents:** Cline (PHPStorm/VSCode), Junie, and other MCP-compatible agents
+- **Format:** Structured markdown following Cline's skill format specification
+- **Content:** Lists all exported files with descriptions, usage examples, and integration notes
+- **Configuration:** Enable/disable via checkbox in module settings (enabled by default)
+
+**What is SKILL.md?**
+AI coding agents like Cline and Junie use SKILL.md files to understand how to use external knowledge sources. This file:
+- Describes when to use the skill
+- Lists all available resource files
+- Provides usage examples
+- Explains the TOON format benefits
+- Shows best practices for querying the context
+
+**Configuration:**
+```
+Setup → Modules → Context → Configure → Export Formats → Generate SKILL.md for AI Agents
+```
+
+**Use case:**
+- Export path: `.agents/skills/context/` (for Cline in PHPStorm)
+- Export path: `.junie/skills/docs/` (for Junie)
+- SKILL.md auto-generated in export directory
+- AI agents can now discover and use ProcessWire context automatically
+
+### Fixed
+
+#### FieldtypeQRCode Compatibility
+- **Fixed:** Error when exporting field definitions for FieldtypeQRCode (reported by @psy)
+- **Root cause:** Some fieldtypes use `.info.php` instead of `getModuleInfo()` method
+- **Solution:** Added `method_exists()` check before calling `getModuleInfo()`
+- **Affected location:** Line ~1928 in `exportFieldDefinitions()`
+
+**Before (ERROR):**
+```php
+'label' => $field->type->getModuleInfo()['title'] ?? $className,
+// Fatal error if getModuleInfo() doesn't exist
+```
+
+**After (FIXED):**
+```php
+$label = $className;
+if(method_exists($field->type, 'getModuleInfo')) {
+    $moduleInfo = $field->type->getModuleInfo();
+    $label = $moduleInfo['title'] ?? $className;
+}
+```
+
+### Technical Details
+
+**New Configuration:**
+- `generate_skill_md` setting (default: `1` - enabled)
+- Checkbox in "Export Formats" section
+
+**New Methods:**
+- `createSkillMd()` - Generates SKILL.md content with:
+  - Dynamic file list based on enabled exports
+  - TOON format files detection
+  - Subdirectory scanning (metadata/, api/, snippets/, prompts/, samples/)
+  - Usage examples and best practices
+  - Site-specific metadata (hostname, etc.)
+
+**Modified Methods:**
+- `executeExport()` - Calls `createSkillMd()` if enabled
+- `exportFieldDefinitions()` - Added `method_exists()` safety check
+
+**Files Created:**
+- `SKILL.md` in export directory (if enabled)
+
+---
+
 ## [1.1.7] - 2026-03-21
 
 ### Added
