@@ -494,6 +494,96 @@ A: Check that "Export TOON Format" is enabled in module settings and you've clic
 **Q: AI assistant doesn't understand my TOON file**  
 A: TOON is plain text - just upload it as you would any text file. Make sure the file has a `.toon` extension.
 
+## Best Practices
+
+### AI Coding Agents (Cline, Junie, etc.)
+
+**SKILL.md Auto-Generation**
+
+The module automatically generates `SKILL.md` for AI coding agents. This file helps agents understand how to use your ProcessWire context.
+
+**Setup for Cline (PHPStorm/VSCode):**
+1. Set export path to `.agents/skills/context/`
+2. Enable "Generate SKILL.md for AI Agents"
+3. Re-export Context
+4. Cline will auto-discover the skill
+
+**Setup for Junie (PHPStorm):**
+1. Set export path to `.junie/skills/docs/`
+2. Enable "Generate SKILL.md for AI Agents"
+3. Re-export Context
+4. Junie will use the context in your coding sessions
+
+### Session Continuity
+
+**Problem:** AI agents don't remember previous sessions. Each new session starts from scratch.
+
+**Solution:** Create a project checkpoint file at the end of each coding session.
+
+**Prompt template** (suggested by @psy):
+
+```
+Create a structured project checkpoint summary.
+
+Output MUST follow this exact format and headings. Use short bullet points only. No paragraphs.
+
+## Project
+(one line description)
+
+## Current State
+- ...
+
+## Decisions Made
+- ...
+
+## Known Issues
+- ...
+
+## What We Tried
+- ...
+
+## Constraints
+- ...
+
+## Next Steps
+1.
+2.
+3.
+
+## Do NOT Do
+- ...
+
+Rules:
+- Be concise and factual
+- Do not explain reasoning unless critical
+- Do not invent anything not discussed
+- Prefer clarity over completeness
+
+Save this as: [your-export-path]/prompts/project-summary.md
+Overwrite the file.
+Do not add any extra commentary outside the file contents.
+```
+
+**Workflow:**
+1. Work on your project with AI agent
+2. Before closing: Ask AI to create checkpoint using the template above
+3. AI saves `prompts/project-summary.md`
+4. Next session: AI reads Context exports + `project-summary.md`
+5. AI understands where you left off and continues seamlessly
+
+**Why this works:**
+- Context module provides site structure
+- `project-summary.md` provides session context
+- Together they give AI complete picture of your project state
+
+### File Upload Strategy
+
+When working with AI assistants:
+- **Upload `.toon` files** instead of `.json` for 30-60% token savings
+- **Upload `SKILL.md`** first so AI understands available resources
+- **Upload specific files** as needed (templates.toon, structure.toon, etc.)
+- **Include `project-summary.md`** for session continuity
+
 ## License
 
 MIT License - see LICENSE file for details

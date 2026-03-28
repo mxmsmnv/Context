@@ -79,6 +79,12 @@ if(method_exists($field->type, 'getModuleInfo')) {
 **Files Created:**
 - `SKILL.md` in export directory (if enabled)
 
+**Documentation:**
+- Added "Best Practices" section to README
+- Session continuity workflow with project-summary.md template (suggested by @psy)
+- AI coding agents setup guide (Cline, Junie)
+- File upload strategy for optimal token usage
+
 ---
 
 ## [1.1.7] - 2026-03-21

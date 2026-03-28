@@ -4218,6 +4218,11 @@ SKILL;
             $tips[] = ['fa-money', 'Use TOON format to reduce AI API costs significantly'];
         }
         
+        // SKILL.md tip if enabled
+        if($this->generate_skill_md) {
+            $tips[] = ['fa-robot', '<strong>AI Agents:</strong> <code>SKILL.md</code> auto-generated for Cline/Junie integration'];
+        }
+        
         // Standard tips
         $tips[] = ['fa-lightbulb-o', 'Upload <code>prompts/project-context.md</code> first when starting with AI'];
         
