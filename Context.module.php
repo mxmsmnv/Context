@@ -2207,6 +2207,10 @@ class Context extends Process implements Module, ConfigurableModule {
         $debugPrompt = $this->generateDebugPrompt();
         file_put_contents($promptsPath . 'debug-issue.md', $debugPrompt);
 
+        // Project summary template for session continuity
+        $projectSummary = $this->generateProjectSummaryTemplate();
+        file_put_contents($promptsPath . 'project-summary.md', $projectSummary);
+
         return true;
     }
 
@@ -2837,6 +2841,94 @@ MD;
         }
         
         return $classes;
+    }
+
+    /**
+     * Generate project summary template for session continuity
+     */
+    protected function generateProjectSummaryTemplate() {
+        $siteName = $this->config->httpHost;
+        
+        return <<<'TEMPLATE'
+# Project Summary
+
+> **Purpose:** This file helps AI agents remember context between sessions. Update this file at the end of each coding session so AI can continue where you left off.
+
+---
+
+## Project
+(One line description of what you're building)
+
+---
+
+## Current State
+- ...
+- ...
+
+---
+
+## Decisions Made
+- ...
+- ...
+
+---
+
+## Known Issues
+- ...
+- ...
+
+---
+
+## What We Tried
+- ...
+- ...
+
+---
+
+## Constraints
+- ...
+- ...
+
+---
+
+## Next Steps
+1. 
+2. 
+3. 
+
+---
+
+## Do NOT Do
+- ...
+- ...
+
+---
+
+## How to Use This File
+
+**At the end of each coding session**, ask your AI agent:
+
+```
+Create a project checkpoint summary and save it to prompts/project-summary.md
+
+Follow this format:
+- Be concise and factual
+- Use bullet points only, no paragraphs
+- Do not explain reasoning unless critical
+- Do not invent anything not discussed
+- Prefer clarity over completeness
+
+Overwrite the existing file.
+```
+
+**At the start of each new session**, the AI agent will automatically read this file (along with the Context exports) to understand your project state.
+
+---
+
+**Last Updated:** (AI will update this automatically)  
+**Session:** (AI will track session number)
+
+TEMPLATE;
     }
 
     /**

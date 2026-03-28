@@ -35,6 +35,29 @@ Setup → Modules → Context → Configure → Export Formats → Generate SKIL
 - SKILL.md auto-generated in export directory
 - AI agents can now discover and use ProcessWire context automatically
 
+#### Project Summary Template
+- **New file:** `prompts/project-summary.md` template auto-generated
+- **Purpose:** Helps AI agents maintain context between coding sessions
+- **Format:** Structured markdown with project state, decisions, issues, next steps
+- **Usage:** Ask AI to update this file at end of each session for session continuity
+
+**How it works:**
+1. Template is auto-created in `prompts/project-summary.md`
+2. At end of coding session: Ask AI to update the file with current state
+3. Next session: AI reads Context exports + project-summary.md
+4. AI understands exactly where you left off
+
+**Template includes:**
+- Project description
+- Current state
+- Decisions made
+- Known issues
+- What was tried
+- Constraints
+- Next steps
+- What NOT to do
+- Instructions on how to use
+
 ### Fixed
 
 #### FieldtypeQRCode Compatibility
@@ -71,13 +94,19 @@ if(method_exists($field->type, 'getModuleInfo')) {
   - Subdirectory scanning (metadata/, api/, snippets/, prompts/, samples/)
   - Usage examples and best practices
   - Site-specific metadata (hostname, etc.)
+- `generateProjectSummaryTemplate()` - Creates project-summary.md template with:
+  - Structured format for session continuity
+  - Instructions on how to use
+  - Sections for state, decisions, issues, next steps
 
 **Modified Methods:**
+- `createPrompts()` - Now generates project-summary.md template
 - `executeExport()` - Calls `createSkillMd()` if enabled
 - `exportFieldDefinitions()` - Added `method_exists()` safety check
 
 **Files Created:**
 - `SKILL.md` in export directory (if enabled)
+- `prompts/project-summary.md` template (if AI Prompts enabled)
 
 **Documentation:**
 - Added "Best Practices" section to README

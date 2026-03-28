@@ -133,6 +133,7 @@ existing patterns in templates.toon.
 ```
 /site/assets/context/
 ├── README.md                      # Documentation with format guide
+├── SKILL.md                       # AI agent skill definition (for Cline, Junie, etc.)
 ├── tree.json                      # Complete site structure (templates + fields + pages)
 ├── tree.toon                      # Complete site structure (TOON - AI optimized!)
 ├── structure.json                 # Page tree (JSON)
@@ -156,6 +157,11 @@ existing patterns in templates.toon.
 ├── api/                           # API schemas (optional)
 ├── snippets/                      # Code library (optional)
 ├── prompts/                       # AI prompts (optional)
+│   ├── project-context.md         # Main project prompt
+│   ├── create-template.md         # Template creation guide
+│   ├── create-api.md              # API creation guide
+│   ├── debug-issue.md             # Debugging helper
+│   └── project-summary.md         # Session continuity template
 └── metadata/                      # Technical data (optional)
 ```
 
@@ -340,6 +346,12 @@ Auto-update exports both JSON and TOON formats if TOON export is enabled.
   - Enabled by default
   - Saves 30-60% tokens
   - Perfect for AI development
+
+- **Generate SKILL.md for AI Agents** - Auto-create skill definition file
+  - Enabled by default
+  - For Cline, Junie, and other AI coding agents
+  - Describes available resources and usage examples
+  - Follows Cline/MCP skill format specification
 
 ### Site Type Selection
 
