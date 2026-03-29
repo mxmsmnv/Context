@@ -5,6 +5,35 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.9] - 2026-03-29
+
+### Fixed
+
+#### Cline Skill Name Compatibility
+- **Fixed:** SKILL.md name must match folder name for Cline (reported by @szabesz)
+- **Changed:** `name: ProcessWire Context - example.com` → `name: context`
+- **Reason:** Cline requires exact folder name match to activate skill
+- **Now works:** Cline automatically discovers and loads the context skill
+
+### Changed
+
+#### Improved Project Summary Template
+- **Updated:** Better template format (improved by @psy)
+- **Rules embedded in file** - AI sees them every update (not separate "How to Use" section)
+- **"Update in place" mode** - Preserves history instead of overwriting
+- **Boundary protection** - `#### DO NOT UPDATE ABOVE THIS LINE ####` prevents AI from modifying instructions
+- **"Remove duplication"** - AI automatically cleans up redundant entries
+- **Shorter, more actionable** - Concise bullet points
+
+**What improved:**
+- Rules are now at the top of the file → AI sees them every time
+- File Instructions section guides AI behavior
+- Boundary line protects template structure
+- Update mode preserves session history
+- Cleaner, more focused format
+
+---
+
 ## [1.1.8] - 2026-03-21
 
 ### Added
@@ -56,7 +85,6 @@ Setup → Modules → Context → Configure → Export Formats → Generate SKIL
 - Constraints
 - Next steps
 - What NOT to do
-- Instructions on how to use
 
 ### Fixed
 
