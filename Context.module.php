@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.2.0', 
+            'version' => '1.3.0', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -29,7 +29,7 @@ class Context extends Process implements Module, ConfigurableModule {
                 'title' => 'Context'
             ],
             'requires' => 'ProcessWire>=3.0',
-            'autoload' => false,
+            'autoload' => true,
             'singular' => true
         ];
     }
@@ -72,11 +72,378 @@ class Context extends Process implements Module, ConfigurableModule {
     public function init() {
         parent::init();
         
+        // Register API variable
+        $this->wire('context', $this);
+        
         // Auto-update if enabled
         if($this->auto_update) {
             $this->addHookAfter('Template::saved', $this, 'autoUpdate');
             $this->addHookAfter('Field::saved', $this, 'autoUpdate');
         }
+    }
+
+    /**
+     * ProcessWire ready - handle CLI commands
+     */
+    public function ready() {
+        if(PHP_SAPI === 'cli') {
+            $argv = $GLOBALS['argv'] ?? [];
+            if(!empty($argv[1]) && strpos($argv[1], '--context-') === 0) {
+                $action = str_replace('--context-', '', $argv[1]);
+                $this->handleCLI($action, $argv);
+            }
+        }
+    }
+
+    /**
+     * Handle CLI commands
+     */
+    protected function handleCLI($action, $argv) {
+        switch($action) {
+            case 'export':
+                $this->cliExport($argv);
+                break;
+            case 'stats':
+                $this->cliStats();
+                break;
+            case 'query':
+                $this->cliQuery($argv);
+                break;
+            case 'help':
+                $this->cliHelp();
+                break;
+            default:
+                echo "Unknown command: --context-{$action}\n";
+                $this->cliHelp();
+                exit(1);
+        }
+        exit(0);
+    }
+
+    /**
+     * CLI Export command
+     */
+    protected function cliExport($argv) {
+        echo "🚀 Starting Context export...\n\n";
+        
+        $toonOnly = in_array('--toon-only', $argv);
+        $jsonOnly = in_array('--json-only', $argv);
+        
+        if($toonOnly) {
+            $this->export_toon_format = 1;
+            echo "📦 Mode: TOON format only\n";
+        } else if($jsonOnly) {
+            $this->export_toon_format = 0;
+            echo "📦 Mode: JSON format only\n";
+        }
+        
+        try {
+            $startTime = microtime(true);
+            $aiPath = $this->ensureFolder($this->getContextPath());
+            
+            echo "📁 Export path: {$aiPath}\n\n";
+            
+            // Run export
+            $this->exportAll($aiPath);
+            
+            $duration = round(microtime(true) - $startTime, 2);
+            
+            echo "\n✅ Context exported successfully!\n";
+            echo "⏱️  Completed in {$duration} seconds\n";
+            echo "📂 Files available at: {$aiPath}\n";
+            
+        } catch(\Exception $e) {
+            echo "\n❌ Export failed: " . $e->getMessage() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * Export all files (for CLI)
+     */
+    protected function exportAll($aiPath) {
+        echo "📄 Exporting structure...\n";
+        $structure = $this->buildPageTree($this->pages->get('/'), 0, $this->max_depth);
+        file_put_contents($aiPath . 'structure.json', json_encode($structure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        if($this->export_toon_format) {
+            file_put_contents($aiPath . 'structure.toon', $this->convertToToon($structure));
+        }
+        
+        $asciiTree = $this->buildAsciiTree($this->pages->get('/'), 0, '', true, $this->max_depth);
+        file_put_contents($aiPath . 'structure.txt', $asciiTree);
+        
+        echo "📝 Exporting templates...\n";
+        $templates = $this->exportTemplates();
+        
+        echo "🌳 Exporting complete tree...\n";
+        $tree = $this->exportTree();
+        file_put_contents($aiPath . 'tree.json', json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        if($this->export_toon_format) {
+            file_put_contents($aiPath . 'tree.toon', $this->convertToToon($tree));
+        }
+        
+        $this->exportMatrixTemplates();
+        $this->exportTemplatesToCSV();
+        
+        echo "⚙️  Exporting configuration...\n";
+        $config = $this->exportConfig();
+        file_put_contents($aiPath . 'config.json', json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        if($this->export_toon_format) {
+            file_put_contents($aiPath . 'config.toon', $this->convertToToon($config));
+        }
+        
+        echo "🔌 Exporting modules...\n";
+        $modules = $this->exportModules();
+        file_put_contents($aiPath . 'modules.json', json_encode($modules, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        
+        if($this->export_toon_format) {
+            file_put_contents($aiPath . 'modules.toon', $this->convertToToon(['modules' => $modules]));
+        }
+        
+        $classes = $this->exportCustomClasses();
+        if(!empty($classes)) {
+            file_put_contents($aiPath . 'classes.json', json_encode($classes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+            if($this->export_toon_format) {
+                file_put_contents($aiPath . 'classes.toon', $this->convertToToon(['classes' => $classes]));
+            }
+        }
+        
+        if($this->export_samples) {
+            echo "📦 Exporting samples...\n";
+            $this->createSamples();
+        }
+        
+        if($this->export_api_docs) {
+            echo "🔗 Exporting API docs...\n";
+            $this->createApiDocs();
+        }
+        
+        if($this->export_routes) {
+            echo "🗺️  Exporting routes...\n";
+            $this->createRoutes();
+        }
+        
+        if($this->export_snippets) {
+            echo "💻 Exporting snippets...\n";
+            $this->createSnippets();
+        }
+        
+        if($this->export_prompts) {
+            echo "📋 Exporting prompts...\n";
+            $this->createPrompts();
+        }
+        
+        if($this->export_field_definitions) {
+            echo "📊 Exporting field definitions...\n";
+            $this->exportFieldDefinitions();
+        }
+        
+        if($this->export_performance) {
+            echo "⚡ Exporting performance metrics...\n";
+            $this->createPerformanceMetrics();
+        }
+        
+        if($this->export_integrations) {
+            echo "🔗 Exporting integrations...\n";
+            $this->createIntegrations();
+        }
+        
+        echo "📖 Creating README...\n";
+        file_put_contents($aiPath . 'README.md', $this->createReadme());
+        
+        if($this->generate_skill_md) {
+            echo "🤖 Generating SKILL.md...\n";
+            file_put_contents($aiPath . 'SKILL.md', $this->createSkillMd());
+        }
+    }
+
+    /**
+     * CLI Stats command
+     */
+    protected function cliStats() {
+        echo "📊 Context Module Statistics\n";
+        echo str_repeat('=', 60) . "\n\n";
+        
+        $templates = 0;
+        foreach($this->templates as $t) {
+            if(!($t->flags & Template::flagSystem)) $templates++;
+        }
+        
+        $fields = 0;
+        foreach($this->fields as $f) {
+            if(!($f->flags & Field::flagSystem)) $fields++;
+        }
+        
+        $pages = $this->pages->count("id>0");
+        
+        $contextPath = $this->getContextPath();
+        $exportSize = 0;
+        if(is_dir($contextPath)) {
+            $exportSize = $this->getDirectorySize($contextPath);
+        }
+        
+        echo "Templates:      {$templates}\n";
+        echo "Fields:         {$fields}\n";
+        echo "Pages:          {$pages}\n";
+        echo "\n";
+        echo "Export Path:    {$contextPath}\n";
+        echo "Export Size:    " . $this->formatBytes($exportSize) . "\n";
+        echo "\n";
+        
+        // Configuration
+        echo "Configuration:\n";
+        echo "  TOON Format:  " . ($this->export_toon_format ? 'Enabled' : 'Disabled') . "\n";
+        echo "  Samples:      " . ($this->export_samples ? 'Enabled' : 'Disabled') . "\n";
+        echo "  SKILL.md:     " . ($this->generate_skill_md ? 'Enabled' : 'Disabled') . "\n";
+        echo "\n";
+    }
+
+    /**
+     * CLI Query command
+     */
+    protected function cliQuery($argv) {
+        if(empty($argv[2])) {
+            echo "❌ Error: Query parameter required\n";
+            echo "Usage: php index.php --context-query \"templates\"\n";
+            exit(1);
+        }
+        
+        $query = $argv[2];
+        
+        switch($query) {
+            case 'templates':
+                $this->cliQueryTemplates();
+                break;
+            case 'fields':
+                $this->cliQueryFields();
+                break;
+            case 'pages':
+                $this->cliQueryPages($argv);
+                break;
+            default:
+                echo "❌ Unknown query: {$query}\n";
+                echo "Available queries: templates, fields, pages\n";
+                exit(1);
+        }
+    }
+
+    /**
+     * Query templates
+     */
+    protected function cliQueryTemplates() {
+        echo "📝 Templates:\n\n";
+        
+        foreach($this->templates as $t) {
+            if($t->flags & Template::flagSystem) continue;
+            
+            $fieldCount = count($t->fields);
+            $pageCount = $this->pages->count("template={$t->name}");
+            
+            echo "  • {$t->name}\n";
+            echo "    Label: {$t->label}\n";
+            echo "    Fields: {$fieldCount}\n";
+            echo "    Pages: {$pageCount}\n";
+            echo "\n";
+        }
+    }
+
+    /**
+     * Query fields
+     */
+    protected function cliQueryFields() {
+        echo "📋 Fields:\n\n";
+        
+        foreach($this->fields as $f) {
+            if($f->flags & Field::flagSystem) continue;
+            
+            echo "  • {$f->name}\n";
+            echo "    Type: {$f->type}\n";
+            echo "    Label: {$f->label}\n";
+            echo "\n";
+        }
+    }
+
+    /**
+     * Query pages
+     */
+    protected function cliQueryPages($argv) {
+        $selector = isset($argv[3]) ? $argv[3] : 'limit=10';
+        
+        echo "📄 Pages ({$selector}):\n\n";
+        
+        $pages = $this->pages->find($selector);
+        
+        foreach($pages as $p) {
+            echo "  • {$p->title}\n";
+            echo "    ID: {$p->id}\n";
+            echo "    Template: {$p->template->name}\n";
+            echo "    URL: {$p->url}\n";
+            echo "\n";
+        }
+        
+        echo "Total: " . count($pages) . " pages\n";
+    }
+
+    /**
+     * CLI Help
+     */
+    protected function cliHelp() {
+        echo "\n";
+        echo "ProcessWire Context Module - CLI Commands\n";
+        echo str_repeat('=', 60) . "\n\n";
+        echo "Usage:\n";
+        echo "  php index.php --context-export [options]\n";
+        echo "  php index.php --context-stats\n";
+        echo "  php index.php --context-query <type> [selector]\n";
+        echo "  php index.php --context-help\n";
+        echo "\n";
+        echo "Export Commands:\n";
+        echo "  --context-export              Full export (JSON + TOON)\n";
+        echo "  --context-export --toon-only  Export only TOON format\n";
+        echo "  --context-export --json-only  Export only JSON format\n";
+        echo "\n";
+        echo "Query Commands:\n";
+        echo "  --context-query templates     List all templates\n";
+        echo "  --context-query fields        List all fields\n";
+        echo "  --context-query pages [sel]   List pages (with optional selector)\n";
+        echo "\n";
+        echo "Stats Commands:\n";
+        echo "  --context-stats               Show module statistics\n";
+        echo "\n";
+        echo "Examples:\n";
+        echo "  php index.php --context-export\n";
+        echo "  php index.php --context-export --toon-only\n";
+        echo "  php index.php --context-query templates\n";
+        echo "  php index.php --context-query pages \"template=product, limit=5\"\n";
+        echo "\n";
+    }
+
+    /**
+     * Get directory size
+     */
+    protected function getDirectorySize($path) {
+        $size = 0;
+        foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path)) as $file) {
+            if($file->isFile()) {
+                $size += $file->getSize();
+            }
+        }
+        return $size;
+    }
+
+    /**
+     * Format bytes
+     */
+    protected function formatBytes($bytes, $precision = 2) {
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= (1 << (10 * $pow));
+        return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
     /**

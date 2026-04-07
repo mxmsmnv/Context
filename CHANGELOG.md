@@ -5,6 +5,86 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-04-06
+
+### Added
+
+#### CLI Commands for AI Agents
+- **New feature:** Complete command-line interface for AI coding agents
+- **Export command:** `php index.php --context-export` - Full export from CLI
+- **Query commands:** Interactive querying of templates, fields, and pages
+- **Stats command:** `php index.php --context-stats` - Quick site statistics
+- **Help command:** `php index.php --context-help` - CLI documentation
+
+**Available CLI Commands:**
+
+**Export:**
+```bash
+php index.php --context-export              # Full export (JSON + TOON)
+php index.php --context-export --toon-only  # TOON format only
+php index.php --context-export --json-only  # JSON format only
+```
+
+**Query:**
+```bash
+php index.php --context-query templates           # List all templates
+php index.php --context-query fields              # List all fields  
+php index.php --context-query pages [selector]    # List pages with optional selector
+```
+
+**Stats:**
+```bash
+php index.php --context-stats                     # Show statistics
+```
+
+**Why CLI?**
+- AI agents (Claude Code, Cursor, Windsurf) can export context without admin access
+- Query specific data instead of loading all files (saves tokens)
+- Automation via cron jobs or CI/CD pipelines
+- Faster than navigating admin interface
+
+#### API Variable Registration
+- **New:** `$context` API variable available throughout ProcessWire
+- **Usage:** `$context = wire('context');` instead of `$modules->get('Context')`
+- **Methods:** `$context->executeExport()`, `$context->getContextPath()`
+
+#### AGENTS.md Documentation
+- **New file:** Complete documentation for AI coding agents
+- **Content:** CLI commands reference, workflow examples, best practices
+- **Location:** `/site/modules/Context/AGENTS.md`
+- **Purpose:** Tell Claude Code/agents to read this file for instructions
+
+### Changed
+
+#### Module Autoload
+- **Changed:** `autoload` set to `true` (was `false`)
+- **Reason:** Required for CLI command handling
+- **Impact:** Module now loads on every request (minimal performance impact)
+
+### Technical Details
+
+**New Methods:**
+- `ready()` - Handles CLI command routing
+- `handleCLI($action, $argv)` - CLI command dispatcher
+- `cliExport($argv)` - Export via CLI with progress indicators
+- `cliStats()` - Display site statistics
+- `cliQuery($argv)` - Query templates/fields/pages
+- `cliQueryTemplates()` - List all templates
+- `cliQueryFields()` - List all fields
+- `cliQueryPages($argv)` - Query pages with selectors
+- `cliHelp()` - Display CLI help
+- `exportAll($aiPath)` - Unified export method for CLI and admin
+- `getDirectorySize($path)` - Calculate export directory size
+- `formatBytes($bytes)` - Human-readable file sizes
+
+**Modified Methods:**
+- `init()` - Now registers `$context` API variable
+
+**Files Added:**
+- `AGENTS.md` - AI agent integration guide
+
+---
+
 ## [1.2.0] - 2026-04-06
 
 ### Fixed
