@@ -156,7 +156,7 @@ existing patterns in templates.toon.
 │   └── product-samples.toon       # AI-optimized samples!
 ├── api/                           # API schemas (optional)
 ├── snippets/                      # Code library (optional)
-├── prompts/                       # AI prompts (optional)
+├── prompts/                       # Prompt templates for manual use (optional)
 │   ├── project-context.md         # Main project prompt
 │   ├── create-template.md         # Template creation guide
 │   ├── create-api.md              # API creation guide

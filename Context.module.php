@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.1.9', 
+            'version' => '1.2.0', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -2208,14 +2208,20 @@ class Context extends Process implements Module, ConfigurableModule {
         file_put_contents($promptsPath . 'debug-issue.md', $debugPrompt);
 
         // Project summary template for session continuity
-        $projectSummary = $this->generateProjectSummaryTemplate();
-        file_put_contents($promptsPath . 'project-summary.md', $projectSummary);
+        // Only create if doesn't exist - preserve user's session history
+        if(!file_exists($promptsPath . 'project-summary.md')) {
+            $projectSummary = $this->generateProjectSummaryTemplate();
+            file_put_contents($promptsPath . 'project-summary.md', $projectSummary);
+        }
 
         return true;
     }
 
     protected function generateProjectContext() {
         $homePage = $this->pages->get('/');
+        
+        // Get dynamic export path (removes trailing slash for consistency)
+        $contextPath = rtrim($this->getContextPath(), '/');
         
         // Detect frontend stack
         $stack = $this->detectFrontendStack();
@@ -2309,7 +2315,7 @@ MD;
 - **Admin**: {$this->config->urls->admin}
 
 ## Content Organization
-This site uses ProcessWire's flexible template system. See `/site/assets/context/structure.txt` for the complete page tree.
+This site uses ProcessWire's flexible template system. See `{$contextPath}/structure.txt` for the complete page tree.
 
 ## Important Patterns
 
@@ -2356,17 +2362,17 @@ MD;
 
 **Core Files (TOON format recommended for AI):**
 - **Structure**: 
-  - `/site/assets/context/structure.toon` - Complete page tree (TOON - 43% fewer tokens)
-  - `/site/assets/context/structure.json` - Complete page tree (JSON)
-  - `/site/assets/context/structure.txt` - ASCII visualization
+  - `{$contextPath}/structure.toon` - Complete page tree (TOON - 43% fewer tokens)
+  - `{$contextPath}/structure.json` - Complete page tree (JSON)
+  - `{$contextPath}/structure.txt` - ASCII visualization
 - **Templates**: 
-  - `/site/assets/context/templates.toon` - All templates with fields (TOON - 50% fewer tokens)
-  - `/site/assets/context/templates.json` - All templates with fields (JSON)
+  - `{$contextPath}/templates.toon` - All templates with fields (TOON - 50% fewer tokens)
+  - `{$contextPath}/templates.json` - All templates with fields (JSON)
 - **Samples**: 
-  - `/site/assets/context/samples/*.toon` - Real content examples (TOON - 46% fewer tokens)
-  - `/site/assets/context/samples/*.json` - Real content examples (JSON)
-- **Snippets**: `/site/assets/context/snippets/` - Code examples
-- **API Docs**: `/site/assets/context/api/` - API schemas and endpoints
+  - `{$contextPath}/samples/*.toon` - Real content examples (TOON - 46% fewer tokens)
+  - `{$contextPath}/samples/*.json` - Real content examples (JSON)
+- **Snippets**: `{$contextPath}/snippets/` - Code examples
+- **API Docs**: `{$contextPath}/api/` - API schemas and endpoints
 
 **💡 Pro Tip**: Always prefer .toon files over .json when available - they contain the same data but use significantly fewer tokens!
 
@@ -2376,7 +2382,7 @@ MD;
 - Implement caching for heavy queries
 - Keep selectors efficient
 
-For detailed information, explore the files in `/site/assets/context/` directory.
+For detailed information, explore the files in `{$contextPath}/` directory.
 
 MD;
 
@@ -2514,7 +2520,9 @@ MD;
     }
 
     protected function generateCreateTemplatePrompt() {
-        return <<<'MD'
+        $contextPath = rtrim($this->getContextPath(), '/');
+        
+        return <<<MD
 # Create ProcessWire Template - AI Prompt
 
 I need help creating a new ProcessWire template.
@@ -2554,9 +2562,9 @@ Provide 1-2 examples of pages that would use this template.
 
 ## Files to Reference
 When generating the template, review:
-- `/site/assets/context/templates.json` - existing field patterns
-- `/site/assets/context/structure.txt` - site structure
-- `/site/assets/context/snippets/selectors.php` - query examples
+- `{$contextPath}/templates.json` - existing field patterns
+- `{$contextPath}/structure.txt` - site structure
+- `{$contextPath}/snippets/selectors.php` - query examples
 
 ## Expected Output
 Please generate:
@@ -2568,7 +2576,9 @@ MD;
     }
 
     protected function generateCreateApiPrompt() {
-        return <<<'MD'
+        $contextPath = rtrim($this->getContextPath(), '/');
+        
+        return <<<MD
 # Create ProcessWire API Endpoint - AI Prompt
 
 I need to create a REST API endpoint for ProcessWire.
@@ -2628,9 +2638,9 @@ I need to create a REST API endpoint for ProcessWire.
 ---
 
 ## Files to Reference
-- `/site/assets/context/api/endpoints.json` - existing API endpoints
-- `/site/assets/context/api/schemas/` - data schemas
-- `/site/assets/context/snippets/api-examples.php` - code patterns
+- `{$contextPath}/api/endpoints.json` - existing API endpoints
+- `{$contextPath}/api/schemas/` - data schemas
+- `{$contextPath}/snippets/api-examples.php` - code patterns
 
 ## Expected Output
 Please generate:
@@ -3417,7 +3427,7 @@ README;
         }
         
         if(is_dir($exportPath . 'prompts/')) {
-            $files[] = "\n- **[prompts/](prompts/)**: AI prompts and instructions";
+            $files[] = "\n- **[prompts/](prompts/)**: Prompt templates for manual LLM/agent use (not auto-loaded by agents)";
         }
         
         if(is_dir($exportPath . 'samples/')) {
@@ -4082,9 +4092,10 @@ SKILL;
             $out .= "</div>";
         }
         
-        // Export Button
-        $out .= "<div style='text-align: center; margin: 32px 0;'>";
+        // Export Buttons
+        $out .= "<div style='text-align: center; margin: 32px 0; display: flex; gap: 12px; justify-content: center; align-items: center;'>";
         
+        // Re-Export Button
         $btn = $this->modules->get('InputfieldButton');
         $btn->href = './export/';
         $btn->icon = 'download';
@@ -4099,12 +4110,23 @@ SKILL;
         
         $out .= $btn->render();
         
+        // Settings Button
+        $settingsBtn = $this->modules->get('InputfieldButton');
+        $settingsBtn->href = './edit/';
+        $settingsBtn->icon = 'cog';
+        $settingsBtn->value = 'Go to Module\'s Settings';
+        $settingsBtn->class = 'ui-button ui-state-default';
+        
+        $out .= $settingsBtn->render();
+        
         if($exists) {
-            $out .= "<div style='margin-top: 12px; font-size: 13px; color: #6b7280;'>";
+            $out .= "</div>";
+            $out .= "<div style='margin-top: 12px; font-size: 13px; color: #6b7280; text-align: center;'>";
             $out .= "<i class='fa fa-folder'></i> <code style='background: #f3f4f6; padding: 4px 8px; border-radius: 4px;'>{$contextPath}</code>";
             $out .= "</div>";
+        } else {
+            $out .= "</div>";
         }
-        $out .= "</div>";
         
         // Configuration table
         $out .= "<div style='background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; border: 1px solid #e5e5e5;'>";

@@ -5,6 +5,57 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-06
+
+### Fixed
+
+#### Hardcoded Export Paths in Prompts
+- **Fixed:** All hardcoded `/site/assets/context/` paths replaced with dynamic `export_path` (reported by @szabesz)
+- **Affected files:** All prompt templates (project-context.md, create-template.md, create-api.md)
+- **Why it matters:** Users with custom export paths (e.g., `/home/user/context-exports/`) now get correct file references
+- **Changed methods:**
+  - `generateProjectContext()` - Added dynamic `$contextPath` variable
+  - `generateCreateTemplatePrompt()` - Replaced hardcoded paths
+  - `generateCreateApiPrompt()` - Replaced hardcoded paths
+
+**Before:**
+```markdown
+- `/site/assets/context/templates.json` - existing field patterns
+```
+
+**After:**
+```markdown
+- `/home/user/context-exports/templates.json` - existing field patterns
+```
+
+#### Prompts Description Clarity
+- **Improved:** Clarified that `prompts/` contains templates for manual use, not auto-loaded by agents (feedback from @szabesz)
+- **SKILL.md:** Changed description to "Prompt templates for manual LLM/agent use (not auto-loaded by agents)"
+- **README.md:** Changed to "Prompt templates for manual use (optional)"
+- **Why:** Prevents AI agents from mistakenly treating prompt templates as project data
+
+### Added
+
+#### "Go to Module's Settings" Button
+- **New button** on dashboard for quick access to module configuration (requested by @szabesz)
+- **Location:** Next to "Re-Export Context for AI" button
+- **Why:** Eliminates need to navigate through admin menus when settings tab is closed
+
+### Changed
+
+#### Project Summary Preservation
+- **Changed:** `project-summary.md` is no longer overwritten on re-export (feedback from @psy)
+- **Behavior:** File only created if it doesn't exist
+- **Why:** Preserves user's session history and change tracking
+- **Implementation:** Added `file_exists()` check before writing template
+
+**What this means:**
+- First export: Creates template
+- Subsequent exports: Preserves your updated content
+- To reset: Manually delete the file
+
+---
+
 ## [1.1.9] - 2026-03-29
 
 ### Fixed
