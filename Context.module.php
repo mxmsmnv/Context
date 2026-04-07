@@ -4112,7 +4112,7 @@ SKILL;
         
         // Settings Button
         $settingsBtn = $this->modules->get('InputfieldButton');
-        $settingsBtn->href = './edit/';
+        $settingsBtn->href = $this->config->urls->admin . 'module/edit?name=Context';
         $settingsBtn->icon = 'cog';
         $settingsBtn->value = 'Go to Module\'s Settings';
         $settingsBtn->class = 'ui-button ui-state-default';
