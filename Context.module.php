@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.3.5', 
+            'version' => '1.4.0', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -4348,82 +4348,35 @@ SKILL;
         
         $out = '';
         
-        // UIkit-based CSS
-        $out .= "<style>
-        .context-metric-card {
-            text-align: center;
-        }
-        .context-metric-value {
-            font-size: 42px;
-            font-weight: 700;
-            line-height: 1.2;
-            margin: 8px 0;
-        }
-        .context-metric-value.success {
-            color: var(--pw-alert-success);
-        }
-        .context-metric-value.primary {
-            color: var(--pw-main-color);
-        }
-        .context-section-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin: 0;
-            font-weight: 600;
-        }
-        .context-tip-item {
-            display: flex;
-            gap: 12px;
-            padding: 12px 0;
-            align-items: start;
-        }
-        .context-config-table th {
-            width: 200px;
-            font-weight: 600;
-        }
-        </style>";
-        
         // Header
         $out .= "<h1 class='uk-h2 uk-margin-remove-top'>Context</h1>";
         
-        // Metrics cards using UIkit
-        $out .= "<div class='uk-grid-small uk-child-width-1-2@s uk-child-width-1-6@m uk-margin' uk-grid>";
+        // Metrics cards using UIkit grid (adaptive: 2 cols mobile, 3 cols tablet, 6 cols desktop)
+        $out .= "<div class='uk-grid-small uk-child-width-1-2 uk-child-width-1-3@s uk-child-width-1-6@m uk-margin' uk-grid>";
         
         // Templates
         $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
         $out .= "<div class='uk-text-meta uk-text-uppercase'>Templates</div>";
-        $out .= "<div class='context-metric-value'>{$stats['templates']}</div>";
+        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['templates']}</div>";
         $out .= "<div class='uk-text-small uk-text-muted'>Total</div>";
         $out .= "</div></div>";
         
         // Fields
         $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
         $out .= "<div class='uk-text-meta uk-text-uppercase'>Fields</div>";
-        $out .= "<div class='context-metric-value'>{$stats['fields']}</div>";
+        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['fields']}</div>";
         $out .= "<div class='uk-text-small uk-text-muted'>Custom</div>";
         $out .= "</div></div>";
         
         // Pages
         $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
         $out .= "<div class='uk-text-meta uk-text-uppercase'>Pages</div>";
-        $out .= "<div class='context-metric-value'>{$stats['pages']}</div>";
+        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['pages']}</div>";
         $out .= "<div class='uk-text-small uk-text-muted'>Published</div>";
         $out .= "</div></div>";
-        $out .= "<div class='context-metric-label'>Fields</div>";
-        $out .= "<div class='context-metric-value'>{$stats['fields']}</div>";
-        $out .= "<div class='context-metric-sublabel'>Custom</div>";
-        $out .= "</div>";
-        
-        // Pages
-        $out .= "<div class='context-metric-card'>";
-        $out .= "<div class='context-metric-label'>Pages</div>";
-        $out .= "<div class='context-metric-value'>{$stats['pages']}</div>";
-        $out .= "<div class='context-metric-sublabel'>Published</div>";
-        $out .= "</div>";
         
         if($exists) {
             $fileCount = 0;
@@ -4439,22 +4392,25 @@ SKILL;
             $lastModified = file_exists($readmePath) ? filemtime($readmePath) : null;
             
             // Exported Files
-            $out .= "<div class='context-metric-card'>";
-            $out .= "<div class='context-metric-label'>Exported Files</div>";
-            $out .= "<div class='context-metric-value success'>{$fileCount}</div>";
-            $out .= "<div class='context-metric-sublabel'>Ready</div>";
-            $out .= "</div>";
+            $out .= "<div>";
+            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
+            $out .= "<div class='uk-text-meta uk-text-uppercase'>Exported Files</div>";
+            $out .= "<div class='uk-h2 uk-margin-remove'>{$fileCount}</div>";
+            $out .= "<div class='uk-text-small'>Ready</div>";
+            $out .= "</div></div>";
             
             // Export Size
-            $out .= "<div class='context-metric-card'>";
-            $out .= "<div class='context-metric-label'>Export Size</div>";
-            $out .= "<div class='context-metric-value success' style='white-space: nowrap;'>" . $this->formatBytes($folderSize) . "</div>";
-            $out .= "<div class='context-metric-sublabel'>Total</div>";
-            $out .= "</div>";
+            $out .= "<div>";
+            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
+            $out .= "<div class='uk-text-meta uk-text-uppercase'>Export Size</div>";
+            $out .= "<div class='uk-h2 uk-margin-remove uk-text-nowrap'>" . $this->formatBytes($folderSize) . "</div>";
+            $out .= "<div class='uk-text-small'>Total</div>";
+            $out .= "</div></div>";
             
             // Last Export
-            $out .= "<div class='context-metric-card'>";
-            $out .= "<div class='context-metric-label'>Last Export</div>";
+            $out .= "<div>";
+            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
+            $out .= "<div class='uk-text-meta uk-text-uppercase'>Last Export</div>";
             if($lastModified) {
                 $diff = time() - $lastModified;
                 if($diff < 60) {
@@ -4469,35 +4425,36 @@ SKILL;
                     $timeAgo = date('M j', $lastModified);
                 }
                 
-                $out .= "<div class='context-metric-value success'>{$timeAgo}</div>";
-                $out .= "<div class='context-metric-sublabel'>" . date('M j, H:i', $lastModified) . "</div>";
+                $out .= "<div class='uk-h2 uk-margin-remove'>{$timeAgo}</div>";
+                $out .= "<div class='uk-text-small'>" . date('M j, H:i', $lastModified) . "</div>";
             } else {
-                $out .= "<div class='context-metric-value'>-</div>";
-                $out .= "<div class='context-metric-sublabel'>Never</div>";
+                $out .= "<div class='uk-h2 uk-margin-remove'>-</div>";
+                $out .= "<div class='uk-text-small'>Never</div>";
             }
-            $out .= "</div>";
+            $out .= "</div></div>";
             
         } else {
             // Status: Not Exported
-            $out .= "<div class='context-metric-card'>";
-            $out .= "<div class='context-metric-label'>Status</div>";
-            $out .= "<div class='context-metric-value warning'>Not Exported</div>";
-            $out .= "<div class='context-metric-sublabel'>Click below</div>";
-            $out .= "</div>";
+            $out .= "<div>";
+            $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
+            $out .= "<div class='uk-text-meta uk-text-uppercase'>Status</div>";
+            $out .= "<div class='uk-h2 uk-margin-remove uk-text-warning'>Not Exported</div>";
+            $out .= "<div class='uk-text-small uk-text-muted'>Click below</div>";
+            $out .= "</div></div>";
         }
         
         $out .= "</div>"; // end metrics grid
         
         // TOON Format Banner (if enabled)
         if($this->export_toon_format) {
-            $out .= "<div class='notes' style='border-radius: 8px; padding: 20px; margin-bottom: 24px;'>";
-            $out .= "<div style='display: flex; align-items: center; gap: 16px;'>";
-            $out .= "<div style='font-size: 42px; color: #10b981;'><i class='fa fa-magic'></i></div>";
-            $out .= "<div style='flex: 1;'>";
-            $out .= "<h3 style='margin: 0 0 8px 0; font-size: 17px; font-weight: 600; color: #1f2937;'>TOON Format Enabled</h3>";
-            $out .= "<p style='margin: 0; font-size: 14px; line-height: 1.6; color: #4b5563;'>";
+            $out .= "<div class='uk-alert uk-alert-success uk-margin'>";
+            $out .= "<div class='uk-flex uk-flex-middle'>";
+            $out .= "<div class='uk-margin-right'><i class='fa fa-magic fa-3x'></i></div>";
+            $out .= "<div class='uk-flex-1'>";
+            $out .= "<h3 class='uk-h4 uk-margin-small-bottom'>TOON Format Enabled</h3>";
+            $out .= "<p class='uk-margin-remove'>";
             $out .= "Your exports include <strong>AI-optimized TOON files</strong> that use <strong>30-60% fewer tokens</strong> than JSON. ";
-            $out .= "Upload <code style='background: #e5e7eb; padding: 2px 6px; border-radius: 3px;'>.toon</code> files to AI assistants to save API costs!";
+            $out .= "Upload <code>.toon</code> files to AI assistants to save API costs!";
             $out .= "</p>";
             $out .= "</div>";
             $out .= "</div>";
@@ -4506,33 +4463,20 @@ SKILL;
         
         // Export Buttons
         $out .= "<div class='uk-text-center uk-margin'>";
-        $out .= "<div class='uk-button-group'>";
-        
-        // Re-Export Button
-        $btn = $this->modules->get('InputfieldButton');
-        $btn->href = './export/';
-        $btn->icon = 'download';
         
         if($exists) {
-            $btn->value = 'Re-Export Context for AI';
-            $btn->class = 'uk-button uk-button-primary';
+            $out .= "<a href='./export/' class='uk-button uk-button-primary uk-margin-small-right'>";
+            $out .= "<i class='fa fa-download'></i> Re-Export Context for AI";
+            $out .= "</a>";
         } else {
-            $btn->value = 'Export Context for AI';
-            $btn->class = 'uk-button uk-button-primary';
+            $out .= "<a href='./export/' class='uk-button uk-button-primary uk-margin-small-right'>";
+            $out .= "<i class='fa fa-download'></i> Export Context for AI";
+            $out .= "</a>";
         }
         
-        $out .= $btn->render();
-        
-        // Settings Button
-        $settingsBtn = $this->modules->get('InputfieldButton');
-        $settingsBtn->href = $this->config->urls->admin . 'module/edit?name=Context';
-        $settingsBtn->icon = 'cog';
-        $settingsBtn->value = 'Go to Module\'s Settings';
-        $settingsBtn->class = 'uk-button uk-button-default';
-        
-        $out .= $settingsBtn->render();
-        
-        $out .= "</div>"; // uk-button-group
+        $out .= "<a href='" . $this->config->urls->admin . "module/edit?name=Context' class='uk-button uk-button-default'>";
+        $out .= "<i class='fa fa-cog'></i> Go to Module's Settings";
+        $out .= "</a>";
         
         if($exists) {
             $out .= "<div class='uk-text-small uk-text-muted uk-margin-small-top'>";
@@ -4549,7 +4493,7 @@ SKILL;
         $out .= "</div>";
         $out .= "<div class='uk-card-body uk-padding-remove'>";
         
-        $out .= "<table class='context-config-table'>";
+        $out .= "<table class='uk-table uk-table-divider uk-table-small uk-table-hover uk-margin-remove'>";
         $out .= "<thead><tr><th>FEATURE</th><th>STATUS</th><th>VALUE</th></tr></thead>";
         $out .= "<tbody>";
         
@@ -4582,17 +4526,17 @@ SKILL;
             if($type === 'boolean') {
                 $isEnabled = $this->$setting ? true : false;
                 if($isEnabled) {
-                    $status = "<span class='context-status-badge success'><i class='fa fa-check'></i> Enabled</span>";
+                    $status = "<span class='uk-label uk-label-success'><i class='fa fa-check'></i> Enabled</span>";
                 } else {
-                    $status = "<span class='context-status-badge muted'><i class='fa fa-times'></i> Disabled</span>";
+                    $status = "<span class='uk-label uk-label-danger'><i class='fa fa-times'></i> Disabled</span>";
                 }
                 $displayValue = $value ?? '-';
             } elseif($type === 'custom') {
                 // Custom check for integration files
                 if($customCheck) {
-                    $status = "<span class='context-status-badge success'><i class='fa fa-check'></i> Created</span>";
+                    $status = "<span class='uk-label uk-label-success'><i class='fa fa-check'></i> Created</span>";
                 } else {
-                    $status = "<span class='context-status-badge muted'><i class='fa fa-times'></i> Not Created</span>";
+                    $status = "<span class='uk-label uk-label-danger'><i class='fa fa-times'></i> Not Created</span>";
                 }
                 $displayValue = $value;
             } else {
@@ -4605,25 +4549,18 @@ SKILL;
         }
         
         $out .= "</tbody></table>";
-        
-        $out .= "<div style='padding: 16px 24px; background: #f9fafb; border-top: 1px solid #e5e7eb;'>";
-        $out .= "<a href='../module/edit?name=Context&collapse_info=1' style='color: #10b981; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;'>";
-        $out .= "<i class='fa fa-cog'></i> Edit configuration";
-        $out .= "</a>";
-        $out .= "</div>";
-        
         $out .= "</div></div>";
         
         // What will be exported
-        $out .= "<div style='background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 24px; border: 1px solid #e5e5e5;'>";
-        $out .= "<div style='padding: 20px 24px; border-bottom: 1px solid #f3f4f6;'>";
-        $out .= "<h3 class='context-section-title'><i class='fa fa-list'></i> What Will Be Exported?</h3>";
+        $out .= "<div class='uk-card uk-card-default uk-margin'>";
+        $out .= "<div class='uk-card-header'>";
+        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-list'></i> What Will Be Exported?</h3>";
         $out .= "</div>";
-        $out .= "<div style='padding: 0;'>";
+        $out .= "<div class='uk-card-body uk-padding-remove'>";
         
         // Single table for all exports
-        $out .= "<table class='context-config-table'>";
-        $out .= "<thead><tr><th style='width: 40%;'>FILE / FOLDER</th><th>TYPE</th><th>DESCRIPTION</th></tr></thead>";
+        $out .= "<table class='uk-table uk-table-divider uk-table-small uk-table-hover uk-margin-remove'>";
+        $out .= "<thead><tr><th class='uk-width-2-5'>FILE / FOLDER</th><th>TYPE</th><th>DESCRIPTION</th></tr></thead>";
         $out .= "<tbody>";
         
         // Core Structure (always exported)
@@ -4676,7 +4613,7 @@ SKILL;
             $icon = $type === 'Folder' ? 'fa-folder' : 'fa-file-text-o';
             $out .= "<tr>";
             $out .= "<td><i class='fa {$icon}'></i> <strong>{$name}</strong></td>";
-            $out .= "<td><span style='color: #10b981; font-weight: 600;'>Core</span></td>";
+            $out .= "<td><span class='uk-label uk-label-success'>Core</span></td>";
             $out .= "<td>{$desc}</td>";
             $out .= "</tr>";
         }
@@ -4697,7 +4634,7 @@ SKILL;
                 $icon = $type === 'Folder' ? 'fa-folder' : 'fa-file-text-o';
                 $out .= "<tr>";
                 $out .= "<td><i class='fa {$icon}'></i> <strong>{$name}</strong></td>";
-                $out .= "<td><span style='color: #f59e0b; font-weight: 600;'>Optional</span></td>";
+                $out .= "<td><span class='uk-label uk-label-warning'>Optional</span></td>";
                 $out .= "<td>{$desc}</td>";
                 $out .= "</tr>";
             }
@@ -4708,19 +4645,17 @@ SKILL;
         $out .= "</div></div>";
         
         // Quick Tips
-        $out .= "<div style='background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border: 1px solid #e5e5e5;'>";
-        $out .= "<div style='padding: 20px 24px; border-bottom: 1px solid #f3f4f6;'>";
-        $out .= "<h3 class='context-section-title'><i class='fa fa-info-circle'></i> Quick Tips</h3>";
+        $out .= "<div class='uk-card uk-card-default uk-margin'>";
+        $out .= "<div class='uk-card-header'>";
+        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-info-circle'></i> Quick Tips</h3>";
         $out .= "</div>";
-        $out .= "<div style='padding: 20px 24px;'>";
-        
-        $out .= "<div class='context-tips-grid'>";
+        $out .= "<div class='uk-card-body'>";
         
         $tips = [];
         
         // TOON-specific tips if enabled
         if($this->export_toon_format) {
-            $tips[] = ['fa-magic', '<strong>NEW!</strong> Upload <code>.toon</code> files to AI instead of <code>.json</code> - saves 30-60% tokens!'];
+            $tips[] = ['fa-magic', 'Upload <code>.toon</code> files to AI instead of <code>.json</code> - saves 30-60% tokens!'];
             $tips[] = ['fa-money', 'Use TOON format to reduce AI API costs significantly'];
         }
         
@@ -4745,20 +4680,13 @@ SKILL;
         $tips[] = ['fa-book', 'Check <code>README.md</code> for complete documentation'];
         
         foreach($tips as list($icon, $text)) {
-            $out .= "<div class='context-tip-item'>";
-            $out .= "<div style='color: #10b981;'><i class='fa {$icon} fa-lg'></i></div>";
-            $out .= "<div>{$text}</div>";
+            $out .= "<div class='uk-flex uk-flex-middle uk-margin-small'>";
+            $out .= "<div class='uk-width-auto uk-text-muted uk-margin-small-right'><i class='fa {$icon} fa-lg'></i></div>";
+            $out .= "<div class='uk-width-expand'>{$text}</div>";
             $out .= "</div>";
         }
         
-        $out .= "</div>";
-        
         $out .= "</div></div>";
-        
-        // Footer
-        $out .= "<div style='text-align: center; margin-top: 32px; padding: 24px; color: #9ca3af; font-size: 13px;'>";
-        $out .= "Context Module v" . self::getModuleInfo()['version'];
-        $out .= "</div>";
         
         return $out;
     }
@@ -4783,18 +4711,6 @@ SKILL;
         }
         
         return $size;
-    }
-
-    /**
-     * Format bytes
-     */
-    protected function formatBytes($bytes, $precision = 2) {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= pow(1024, $pow);
-        return round($bytes, $precision) . ' ' . $units[$pow];
     }
 
     /**

@@ -5,6 +5,82 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-18
+
+### Changed
+
+#### Complete UIkit Design System Compliance
+
+Redesigned entire admin dashboard to follow ProcessWire's AdminThemeUikit design system standards:
+
+**Removed Custom CSS:**
+- Eliminated all custom CSS classes and inline styles
+- Replaced with native UIkit classes and ProcessWire CSS variables
+- Dashboard now respects light/dark theme switching automatically
+
+**Cards:**
+- `uk-card uk-card-default uk-margin` - consistent card styling
+- `uk-card-header` / `uk-card-body` / `uk-card-footer` - proper structure
+- Uses `var(--pw-blocks-background)` and `var(--pw-border-color)`
+
+**Tables:**
+- `uk-table uk-table-divider uk-table-small uk-table-hover` - native UIkit tables
+- Automatic ProcessWire theming via CSS variables
+- Removed custom `.context-config-table` class
+
+**Status Badges:**
+- `.context-status-badge.enabled` - uses `var(--pw-alert-success)`
+- `.context-status-badge.disabled` - uses `var(--pw-alert-danger)`
+- Automatic theme adaptation
+
+**TOON Banner:**
+- Converted to `uk-alert uk-alert-success`
+- `uk-flex uk-flex-middle` layout
+- Removed inline styles
+
+**Buttons:**
+- `uk-button-group` for button grouping
+- `uk-button uk-button-primary` / `uk-button-default`
+- Native ProcessWire button styling
+
+**Metrics Cards:**
+- Pure UIkit grid: `uk-grid-small uk-child-width-1-6@m`
+- Success color: `var(--pw-alert-success)`
+- Primary color: `var(--pw-main-color)`
+
+**Quick Tips:**
+- Clean `uk-card` structure
+- `uk-text-success` for icons
+- No custom styling needed
+
+### Fixed
+
+#### Duplicate formatBytes() Method
+- **Fixed:** Removed duplicate `formatBytes()` method definition at line 4791 (reported by @matjazp)
+- **Impact:** Cleaner code, no functional changes
+- **Credit:** Thank you @matjazp for the bug report!
+
+### Technical Details
+
+**CSS Variables Used:**
+- `--pw-text-color` - Main text color (light/dark adaptive)
+- `--pw-muted-color` - Muted text
+- `--pw-main-color` - Primary brand color
+- `--pw-border-color` - Borders
+- `--pw-blocks-background` - Card backgrounds
+- `--pw-alert-success` - Success states
+- `--pw-alert-danger` - Error states
+- `--pw-alert-warning` - Warning states
+
+**Why This Matters:**
+- Dashboard now follows ProcessWire design standards
+- Automatic light/dark theme support
+- Consistent with other ProcessWire admin interfaces
+- Easier maintenance - no custom CSS to update
+- Better accessibility through native UIkit components
+
+---
+
 ## [1.3.5] - 2026-04-18
 
 ### Added
@@ -52,6 +128,12 @@ echo "Created: " . $p->url . "\n";
 
 **Security Note:**
 These commands execute with full ProcessWire privileges. Use only in development environments or with proper security measures.
+
+### Fixed
+
+#### Duplicate formatBytes() Method
+- **Fixed:** Removed duplicate `formatBytes()` method definition (reported by @matjazp)
+- **Impact:** No functional change, just cleaner code
 
 ### Changed
 
