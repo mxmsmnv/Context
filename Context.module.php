@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.3.0', 
+            'version' => '1.3.5', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -108,6 +108,12 @@ class Context extends Process implements Module, ConfigurableModule {
                 break;
             case 'query':
                 $this->cliQuery($argv);
+                break;
+            case 'eval':
+                $this->cliEval($argv);
+                break;
+            case 'stdin':
+                $this->cliStdin();
                 break;
             case 'help':
                 $this->cliHelp();
@@ -388,6 +394,86 @@ class Context extends Process implements Module, ConfigurableModule {
     }
 
     /**
+     * CLI Eval - Execute PHP code with ProcessWire API access
+     */
+    protected function cliEval($argv) {
+        if(empty($argv[2])) {
+            echo "❌ Error: Code parameter required\n";
+            echo "Usage: php index.php --context-eval 'echo \$pages->count();'\n";
+            exit(1);
+        }
+        
+        $code = $argv[2];
+        
+        // Make all ProcessWire API variables available
+        $pages = $this->pages;
+        $templates = $this->templates;
+        $fields = $this->fields;
+        $modules = $this->modules;
+        $config = $this->config;
+        $users = $this->users;
+        $session = $this->session;
+        $input = $this->input;
+        $sanitizer = $this->sanitizer;
+        $database = $this->database;
+        $cache = $this->cache;
+        $log = $this->log;
+        $files = $this->files;
+        $context = $this;
+        
+        // Add ProcessWire namespace to code
+        $code = '?>' . '<?php namespace ProcessWire; ' . $code;
+        
+        try {
+            eval($code);
+        } catch(\Throwable $e) {
+            echo "❌ Error: " . $e->getMessage() . "\n";
+            echo "   Line: " . $e->getLine() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
+     * CLI Stdin - Execute multi-line PHP code from stdin
+     */
+    protected function cliStdin() {
+        $code = file_get_contents('php://stdin');
+        
+        if(empty(trim($code))) {
+            echo "❌ Error: No code provided via stdin\n";
+            echo "Usage: echo 'CODE' | php index.php --context-stdin\n";
+            exit(1);
+        }
+        
+        // Make all ProcessWire API variables available
+        $pages = $this->pages;
+        $templates = $this->templates;
+        $fields = $this->fields;
+        $modules = $this->modules;
+        $config = $this->config;
+        $users = $this->users;
+        $session = $this->session;
+        $input = $this->input;
+        $sanitizer = $this->sanitizer;
+        $database = $this->database;
+        $cache = $this->cache;
+        $log = $this->log;
+        $files = $this->files;
+        $context = $this;
+        
+        // Add ProcessWire namespace to code
+        $code = '?>' . '<?php namespace ProcessWire; ' . $code;
+        
+        try {
+            eval($code);
+        } catch(\Throwable $e) {
+            echo "❌ Error: " . $e->getMessage() . "\n";
+            echo "   Line: " . $e->getLine() . "\n";
+            exit(1);
+        }
+    }
+
+    /**
      * CLI Help
      */
     protected function cliHelp() {
@@ -398,6 +484,8 @@ class Context extends Process implements Module, ConfigurableModule {
         echo "  php index.php --context-export [options]\n";
         echo "  php index.php --context-stats\n";
         echo "  php index.php --context-query <type> [selector]\n";
+        echo "  php index.php --context-eval 'CODE'\n";
+        echo "  echo 'CODE' | php index.php --context-stdin\n";
         echo "  php index.php --context-help\n";
         echo "\n";
         echo "Export Commands:\n";
@@ -410,14 +498,31 @@ class Context extends Process implements Module, ConfigurableModule {
         echo "  --context-query fields        List all fields\n";
         echo "  --context-query pages [sel]   List pages (with optional selector)\n";
         echo "\n";
+        echo "API Access Commands:\n";
+        echo "  --context-eval 'CODE'         Execute PHP code with PW API access\n";
+        echo "  echo 'CODE' | --context-stdin Execute multi-line code from stdin\n";
+        echo "\n";
         echo "Stats Commands:\n";
         echo "  --context-stats               Show module statistics\n";
         echo "\n";
         echo "Examples:\n";
+        echo "  # Export\n";
         echo "  php index.php --context-export\n";
         echo "  php index.php --context-export --toon-only\n";
+        echo "\n";
+        echo "  # Query\n";
         echo "  php index.php --context-query templates\n";
         echo "  php index.php --context-query pages \"template=product, limit=5\"\n";
+        echo "\n";
+        echo "  # API Access\n";
+        echo "  php index.php --context-eval 'echo \$pages->count() . \" pages\\n\";'\n";
+        echo "  php index.php --context-eval '\$p = \$pages->get(1); echo \$p->title;'\n";
+        echo "\n";
+        echo "  # Multi-line code\n";
+        echo "  echo 'foreach(\$templates as \$t) {\n";
+        echo "    if(\$t->flags & Template::flagSystem) continue;\n";
+        echo "    echo \$t->name . \"\\n\";\n";
+        echo "  }' | php index.php --context-stdin\n";
         echo "\n";
     }
 
@@ -4243,131 +4348,71 @@ SKILL;
         
         $out = '';
         
-        // Custom CSS
+        // UIkit-based CSS
         $out .= "<style>
         .context-metric-card {
-            background: #fff;
-            border-radius: 8px;
-            padding: 24px;
             text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            border: 1px solid #e5e5e5;
-        }
-        .context-metric-label {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #999;
-            font-weight: 600;
-            margin-bottom: 8px;
         }
         .context-metric-value {
-            font-size: 36px;
+            font-size: 42px;
             font-weight: 700;
-            color: #333;
-            line-height: 1;
-            margin: 12px 0;
+            line-height: 1.2;
+            margin: 8px 0;
         }
         .context-metric-value.success {
-            color: #10b981;
+            color: var(--pw-alert-success);
         }
-        .context-metric-value.warning {
-            color: #f59e0b;
-        }
-        .context-metric-sublabel {
-            font-size: 12px;
-            color: #666;
-            margin-top: 4px;
-        }
-        .context-status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-        .context-status-badge.success {
-            background: #d1fae5;
-            color: #065f46;
-        }
-        .context-status-badge.muted {
-            background: #f3f4f6;
-            color: #6b7280;
-        }
-        .context-config-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .context-config-table th {
-            text-align: left;
-            padding: 12px 16px;
-            background: #f9fafb;
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #6b7280;
-            font-weight: 600;
-            border-bottom: 2px solid #e5e7eb;
-        }
-        .context-config-table td {
-            padding: 14px 16px;
-            border-bottom: 1px solid #f3f4f6;
-            font-size: 14px;
+        .context-metric-value.primary {
+            color: var(--pw-main-color);
         }
         .context-section-title {
-            font-size: 20px;
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 20px;
             display: flex;
             align-items: center;
             gap: 8px;
-        }
-        .context-tips-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 12px;
+            margin: 0;
+            font-weight: 600;
         }
         .context-tip-item {
             display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            padding: 12px;
-            background: #f9fafb;
-            border-radius: 6px;
-            font-size: 13px;
-            line-height: 1.6;
+            gap: 12px;
+            padding: 12px 0;
+            align-items: start;
         }
-        .context-tip-item code {
-            background: #e5e7eb;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 12px;
-        }
-        .bi {
-            display: inline-block;
-            width: 1em;
-            height: 1em;
-            vertical-align: -0.125em;
+        .context-config-table th {
+            width: 200px;
+            font-weight: 600;
         }
         </style>";
         
-        // Big metrics cards (без заголовка)
-        $out .= "<div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 32px;'>";
+        // Header
+        $out .= "<h1 class='uk-h2 uk-margin-remove-top'>Context</h1>";
+        
+        // Metrics cards using UIkit
+        $out .= "<div class='uk-grid-small uk-child-width-1-2@s uk-child-width-1-6@m uk-margin' uk-grid>";
         
         // Templates
-        $out .= "<div class='context-metric-card'>";
-        $out .= "<div class='context-metric-label'>Templates</div>";
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-text-meta uk-text-uppercase'>Templates</div>";
         $out .= "<div class='context-metric-value'>{$stats['templates']}</div>";
-        $out .= "<div class='context-metric-sublabel'>Total</div>";
-        $out .= "</div>";
+        $out .= "<div class='uk-text-small uk-text-muted'>Total</div>";
+        $out .= "</div></div>";
         
         // Fields
-        $out .= "<div class='context-metric-card'>";
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-text-meta uk-text-uppercase'>Fields</div>";
+        $out .= "<div class='context-metric-value'>{$stats['fields']}</div>";
+        $out .= "<div class='uk-text-small uk-text-muted'>Custom</div>";
+        $out .= "</div></div>";
+        
+        // Pages
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-default uk-card-body context-metric-card'>";
+        $out .= "<div class='uk-text-meta uk-text-uppercase'>Pages</div>";
+        $out .= "<div class='context-metric-value'>{$stats['pages']}</div>";
+        $out .= "<div class='uk-text-small uk-text-muted'>Published</div>";
+        $out .= "</div></div>";
         $out .= "<div class='context-metric-label'>Fields</div>";
         $out .= "<div class='context-metric-value'>{$stats['fields']}</div>";
         $out .= "<div class='context-metric-sublabel'>Custom</div>";
@@ -4460,7 +4505,8 @@ SKILL;
         }
         
         // Export Buttons
-        $out .= "<div style='text-align: center; margin: 32px 0; display: flex; gap: 12px; justify-content: center; align-items: center;'>";
+        $out .= "<div class='uk-text-center uk-margin'>";
+        $out .= "<div class='uk-button-group'>";
         
         // Re-Export Button
         $btn = $this->modules->get('InputfieldButton');
@@ -4469,10 +4515,10 @@ SKILL;
         
         if($exists) {
             $btn->value = 'Re-Export Context for AI';
-            $btn->class = 'ui-button ui-state-default ui-priority-secondary';
+            $btn->class = 'uk-button uk-button-primary';
         } else {
             $btn->value = 'Export Context for AI';
-            $btn->class = 'ui-button ui-state-default';
+            $btn->class = 'uk-button uk-button-primary';
         }
         
         $out .= $btn->render();
@@ -4482,25 +4528,26 @@ SKILL;
         $settingsBtn->href = $this->config->urls->admin . 'module/edit?name=Context';
         $settingsBtn->icon = 'cog';
         $settingsBtn->value = 'Go to Module\'s Settings';
-        $settingsBtn->class = 'ui-button ui-state-default';
+        $settingsBtn->class = 'uk-button uk-button-default';
         
         $out .= $settingsBtn->render();
         
+        $out .= "</div>"; // uk-button-group
+        
         if($exists) {
-            $out .= "</div>";
-            $out .= "<div style='margin-top: 12px; font-size: 13px; color: #6b7280; text-align: center;'>";
-            $out .= "<i class='fa fa-folder'></i> <code style='background: #f3f4f6; padding: 4px 8px; border-radius: 4px;'>{$contextPath}</code>";
-            $out .= "</div>";
-        } else {
+            $out .= "<div class='uk-text-small uk-text-muted uk-margin-small-top'>";
+            $out .= "<i class='fa fa-folder'></i> <code>{$contextPath}</code>";
             $out .= "</div>";
         }
         
+        $out .= "</div>"; // uk-text-center
+        
         // Configuration table
-        $out .= "<div style='background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); overflow: hidden; margin-bottom: 24px; border: 1px solid #e5e5e5;'>";
-        $out .= "<div style='padding: 20px 24px; border-bottom: 1px solid #f3f4f6;'>";
-        $out .= "<h3 class='context-section-title'><i class='fa fa-cog'></i> Module Configuration</h3>";
+        $out .= "<div class='uk-card uk-card-default uk-margin'>";
+        $out .= "<div class='uk-card-header'>";
+        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-cog'></i> Module Configuration</h3>";
         $out .= "</div>";
-        $out .= "<div style='padding: 0;'>";
+        $out .= "<div class='uk-card-body uk-padding-remove'>";
         
         $out .= "<table class='context-config-table'>";
         $out .= "<thead><tr><th>FEATURE</th><th>STATUS</th><th>VALUE</th></tr></thead>";

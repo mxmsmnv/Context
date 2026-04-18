@@ -5,6 +5,85 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-04-18
+
+### Added
+
+#### Full ProcessWire API Access via CLI
+
+**New Commands:**
+- `--context-eval 'CODE'` - Execute single-line PHP code with full ProcessWire API access
+- `--context-stdin` - Execute multi-line PHP code from stdin
+
+**Why this is a game changer:**
+- AI agents can now **create, read, update, and delete** anything in ProcessWire
+- Full access to `$pages`, `$templates`, `$fields`, `$modules`, `$config`, etc.
+- Same power as AgentTools module, but integrated with Context
+- Perfect for Claude Code, Cursor, Windsurf automation
+
+**Examples:**
+
+Single-line commands:
+```bash
+# Count pages
+php index.php --context-eval 'echo $pages->count() . " pages\n";'
+
+# Get specific page
+php index.php --context-eval '$p = $pages->get(1); echo $p->title;'
+```
+
+Multi-line scripts:
+```bash
+echo '
+$p = new Page();
+$p->template = "basic-page";
+$p->parent = $pages->get("/");
+$p->title = "New Page";
+$p->save();
+echo "Created: " . $p->url . "\n";
+' | php index.php --context-stdin
+```
+
+**Available API variables in eval/stdin:**
+- `$pages`, `$templates`, `$fields`, `$modules`
+- `$config`, `$users`, `$session`, `$input`
+- `$sanitizer`, `$database`, `$cache`, `$log`, `$files`
+- `$context` (Context module instance)
+
+**Security Note:**
+These commands execute with full ProcessWire privileges. Use only in development environments or with proper security measures.
+
+### Changed
+
+#### Documentation Updates
+- **AGENTS.md** - Added Scenario 4 with comprehensive API access examples
+- **CHANGELOG** - Enhanced with detailed eval/stdin usage examples
+
+### Technical Details
+
+**New Methods:**
+- `cliEval($argv)` - Execute PHP code with full PW API access
+  - Extracts all ProcessWire API variables
+  - Wraps code in ProcessWire namespace
+  - Comprehensive error handling with line numbers
+- `cliStdin()` - Execute multi-line code from stdin
+  - Reads from `php://stdin`
+  - Same API access as eval
+  - Perfect for complex scripts
+
+**Modified Methods:**
+- `handleCLI()` - Added `eval` and `stdin` cases
+- `cliHelp()` - Updated with API Access Commands section and examples
+
+**Pattern:**
+Both methods use identical approach:
+1. Make all PW API variables available via `$this->pages`, `$this->templates`, etc.
+2. Add ProcessWire namespace wrapper: `namespace ProcessWire;`
+3. Execute with `eval()`
+4. Catch and display errors with context
+
+---
+
 ## [1.3.0] - 2026-04-06
 
 ### Added
@@ -32,6 +111,12 @@ php index.php --context-query fields              # List all fields
 php index.php --context-query pages [selector]    # List pages with optional selector
 ```
 
+**API Access:**
+```bash
+php index.php --context-eval 'CODE'               # Execute PHP code with PW API
+echo 'CODE' | php index.php --context-stdin       # Multi-line code from stdin
+```
+
 **Stats:**
 ```bash
 php index.php --context-stats                     # Show statistics
@@ -39,6 +124,7 @@ php index.php --context-stats                     # Show statistics
 
 **Why CLI?**
 - AI agents (Claude Code, Cursor, Windsurf) can export context without admin access
+- **Full API access** - AI can query, create, modify pages/templates/fields directly
 - Query specific data instead of loading all files (saves tokens)
 - Automation via cron jobs or CI/CD pipelines
 - Faster than navigating admin interface
@@ -72,6 +158,8 @@ php index.php --context-stats                     # Show statistics
 - `cliQueryTemplates()` - List all templates
 - `cliQueryFields()` - List all fields
 - `cliQueryPages($argv)` - Query pages with selectors
+- `cliEval($argv)` - **Execute PHP code with full PW API access**
+- `cliStdin()` - **Execute multi-line code from stdin**
 - `cliHelp()` - Display CLI help
 - `exportAll($aiPath)` - Unified export method for CLI and admin
 - `getDirectorySize($path)` - Calculate export directory size

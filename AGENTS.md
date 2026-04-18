@@ -51,6 +51,19 @@ php index.php --context-stats
 | `php index.php --context-query fields` | List all fields with types |
 | `php index.php --context-query pages [selector]` | List pages (with optional PW selector) |
 
+### API Access Commands
+
+| Command | Description |
+|---------|-------------|
+| `php index.php --context-eval 'CODE'` | Execute PHP code with full ProcessWire API access |
+| `echo 'CODE' \| php index.php --context-stdin` | Execute multi-line code from stdin |
+
+**Available API Variables:**
+- `$pages`, `$templates`, `$fields`, `$modules`, `$config`
+- `$users`, `$session`, `$input`, `$sanitizer`
+- `$database`, `$cache`, `$log`, `$files`
+- `$context` (Context module instance)
+
 ### Stats Commands
 
 | Command | Description |
@@ -134,6 +147,49 @@ php index.php --context-export
 # - snippets/ for code patterns
 ```
 
+### Scenario 4: Direct API Access (Advanced)
+
+```bash
+# Quick page count
+php index.php --context-eval 'echo $pages->count() . " pages\n";'
+
+# Find specific pages
+php index.php --context-eval '
+foreach($pages->find("template=product, limit=5") as $p) {
+  echo $p->title . "\n";
+}'
+
+# Create a new page
+echo '
+$p = new Page();
+$p->template = "basic-page";
+$p->parent = $pages->get("/");
+$p->title = "Test Page";
+$p->save();
+echo "Created page: " . $p->url . "\n";
+' | php index.php --context-stdin
+
+# Modify template (multi-line)
+echo '
+$t = $templates->get("product");
+if($t) {
+  $t->label = "Product Item";
+  $t->save();
+  echo "Updated template: " . $t->name . "\n";
+}
+' | php index.php --context-stdin
+
+# Complex data query
+php index.php --context-eval '
+$products = $pages->find("template=product, sort=-created, limit=10");
+echo "Recent products:\n";
+foreach($products as $p) {
+  echo "- " . $p->title . " (" . $p->created . ")\n";
+}'
+```
+
+**⚠️ Security Note:** These commands have full ProcessWire API access. Only use in development environments or with proper security measures.
+
 ## API Variable Access
 
 In ProcessWire code, you can access the Context module via the `$context` API variable:
@@ -182,7 +238,27 @@ Point Claude to your export directory and it can read all files directly.
 
 ### Session Continuity
 
-The module creates `prompts/project-summary.md` template. Ask your AI agent to update this file at the end of each session to maintain context between sessions.
+The module creates `prompts/project-summary.md` template for maintaining context between coding sessions.
+
+**How it works:**
+1. Module creates the template on first export (won't overwrite on re-export)
+2. At end of each session: Ask AI to update the file
+3. Next session: AI reads it and knows where you left off
+
+**Prompt to use at end of session:**
+```
+Update prompts/project-summary.md with current project state.
+
+Follow the existing format in the file:
+- Be concise and factual
+- Use bullet points
+- Update in place (don't overwrite history)
+- Remove any duplication
+
+Save the file.
+```
+
+The file has embedded rules and a boundary line (`DO NOT UPDATE ABOVE THIS LINE`) to protect the template structure.
 
 ## Troubleshooting
 
