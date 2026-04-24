@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.4.0', 
+            'version' => '1.4.3', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -832,6 +832,241 @@ class Context extends Process implements Module, ConfigurableModule {
         return $output;
     }
 
+    // -------------------------------------------------------------------------
+    // ProFields helpers — use official module APIs, never raw ->data[] access
+    // -------------------------------------------------------------------------
+
+    /**
+     * Get FieldtypeTable columns using the official API.
+     *
+     * Returns an array of columns, each with keys: name, label, type, options, selector.
+     * Falls back gracefully when FieldtypeTable is not installed.
+     *
+     * @param Field $field
+     * @return array
+     */
+    protected function getTableColumns(Field $field) {
+        $columns = [];
+        try {
+            // Use the official getColumnsByName() API
+            $cols = $field->type->getColumnsByName($field);
+            foreach($cols as $name => $col) {
+                if(empty($name)) continue;
+                $colData = [
+                    'name'  => $col['name'],
+                    'label' => $col['label'] ?: $col['name'],
+                    'type'  => $col['type'] ?: 'text',
+                ];
+                // Options: already an array after getColumn() processes them
+                if(!empty($col['options']) && is_array($col['options'])) {
+                    $colData['options'] = array_values(array_filter($col['options'], 'strlen'));
+                }
+                if(!empty($col['selector'])) {
+                    $colData['selector'] = $col['selector'];
+                }
+                $columns[] = $colData;
+            }
+        } catch(\Exception $e) {
+            $this->log("getTableColumns({$field->name}) failed: " . $e->getMessage());
+        }
+        return $columns;
+    }
+
+    /**
+     * Get FieldtypeCombo subfields using the official API.
+     *
+     * Returns an array of subfield definitions with keys:
+     * name, label, type, required, columnWidth, description, notes, options.
+     * Falls back gracefully when FieldtypeCombo is not installed.
+     *
+     * @param Field $field
+     * @return array
+     */
+    protected function getComboSubfields(Field $field) {
+        $subfields = [];
+        try {
+            // ComboField::getComboSettings() returns a ComboSettings object
+            $settings = $field->getComboSettings();
+            foreach($settings->getSubfields() as $sub) {
+                $subfieldData = [
+                    'name'        => $sub->name,
+                    'label'       => $sub->label ?: $sub->name,
+                    'type'        => $sub->type,
+                    'required'    => $sub->required ? 1 : 0,
+                    'columnWidth' => $sub->columnWidth ?: 100,
+                ];
+                if($sub->description) $subfieldData['description'] = $sub->description;
+                if($sub->notes)       $subfieldData['notes']       = $sub->notes;
+                // Options: stored in ComboSubfield->options (array or newline string)
+                if(!empty($sub->options)) {
+                    $opts = $sub->options;
+                    if(is_string($opts)) {
+                        $opts = array_values(array_filter(array_map('trim', explode("\n", $opts)), 'strlen'));
+                    }
+                    if(!empty($opts)) $subfieldData['options'] = $opts;
+                }
+                $subfields[] = $subfieldData;
+            }
+        } catch(\Exception $e) {
+            $this->log("getComboSubfields({$field->name}) failed: " . $e->getMessage());
+        }
+        return $subfields;
+    }
+
+    /**
+     * Get FieldtypeRepeaterMatrix types with their fields using the official API.
+     *
+     * Returns an array of matrix type definitions:
+     * [ name, label, head, sort, fields[] ]
+     * Each field entry contains full field metadata (same shape as exportTemplates fields).
+     * Falls back gracefully when FieldtypeRepeaterMatrix is not installed.
+     *
+     * @param Field $field
+     * @return array
+     */
+    protected function getMatrixTypesData(Field $field) {
+        $types = [];
+        try {
+            // getMatrixTypesInfo() returns all type data including Field objects
+            $typesInfo = $field->getMatrixTypesInfo();
+            foreach($typesInfo as $typeName => $typeInfo) {
+                $typeData = [
+                    'name'  => $typeName,
+                    'label' => $typeInfo['label'] ?: $typeName,
+                    'head'  => $typeInfo['head'] ?: '',
+                    'sort'  => (int)($typeInfo['sort'] ?? 0),
+                    'fields' => [],
+                ];
+                // $typeInfo['fields'] is [ fieldName => Field ] in template context
+                foreach($typeInfo['fields'] as $matrixField) {
+                    if(!($matrixField instanceof Field)) continue;
+                    if($matrixField->name === 'repeater_matrix_type') continue;
+                    $typeData['fields'][] = $this->buildFieldData($matrixField);
+                }
+                $types[] = $typeData;
+            }
+            // Sort by sort value
+            usort($types, function($a, $b) { return $a['sort'] - $b['sort']; });
+        } catch(\Exception $e) {
+            $this->log("getMatrixTypesData({$field->name}) failed: " . $e->getMessage());
+        }
+        return $types;
+    }
+
+    /**
+     * Build a standardised field data array for a single Field object.
+     *
+     * Used by getMatrixTypesData() and can be used anywhere a consistent
+     * field representation is needed. Handles Page, Options, Image/File,
+     * Text/Textarea, Table, Combo, Repeater, and nested RepeaterMatrix fields.
+     *
+     * @param Field $field
+     * @return array
+     */
+    protected function buildFieldData(Field $field) {
+        $data = [
+            'name'        => $field->name,
+            'type'        => $field->type->className(),
+            'label'       => $field->label,
+            'required'    => $field->required ? 1 : 0,
+            'columnWidth' => $field->columnWidth ?: 100,
+        ];
+        if($field->description) $data['description'] = $field->description;
+        if($field->notes)       $data['notes']       = $field->notes;
+
+        // Page reference
+        if($field->type instanceof FieldtypePage) {
+            $data['derefAsPage'] = $field->derefAsPage;
+            if($field->parent_id) {
+                $parent = $this->pages->get($field->parent_id);
+                if($parent && $parent->id) $data['parent'] = $parent->path;
+            }
+            if($field->template_id) {
+                $tmpl = $this->templates->get($field->template_id);
+                if($tmpl) $data['template'] = $tmpl->name;
+            }
+            if(!empty($field->template_ids) && is_array($field->template_ids)) {
+                $data['templates'] = [];
+                foreach($field->template_ids as $tid) {
+                    $t = $this->templates->get((int)$tid);
+                    if($t) $data['templates'][] = $t->name;
+                }
+            }
+            if($field->findPagesSelector) $data['selector'] = $field->findPagesSelector;
+            $data['inputfield'] = $field->inputfield;
+        }
+
+        // Selectable options
+        if($field->type instanceof FieldtypeOptions) {
+            $data['options'] = [];
+            try {
+                foreach($field->type->getOptions($field) as $opt) {
+                    $data['options'][] = [
+                        'id'    => $opt->id,
+                        'value' => $opt->value,
+                        'title' => $opt->title,
+                    ];
+                }
+            } catch(\Exception $e) {}
+        }
+
+        // Image / File
+        if($field->type instanceof FieldtypeImage || $field->type instanceof FieldtypeFile) {
+            $data['maxFiles']   = $field->maxFiles;
+            $data['extensions'] = $field->extensions;
+            if($field->type instanceof FieldtypeImage) {
+                if($field->maxWidth)  $data['maxWidth']  = $field->maxWidth;
+                if($field->maxHeight) $data['maxHeight'] = $field->maxHeight;
+            }
+        }
+
+        // Text / Textarea
+        $textTypes = ['FieldtypeText', 'FieldtypeTextarea'];
+        if(in_array($field->type->className(), $textTypes)) {
+            if($field->maxlength) $data['maxlength'] = $field->maxlength;
+            if($field->type->className() === 'FieldtypeTextarea') {
+                $data['rows']        = $field->rows;
+                $data['contentType'] = $field->contentType;
+            }
+        }
+
+        // ProFields: Table
+        if($field->type->className() === 'FieldtypeTable') {
+            $data['columns'] = $this->getTableColumns($field);
+        }
+
+        // ProFields: Combo
+        if($field->type->className() === 'FieldtypeCombo') {
+            $data['subfields'] = $this->getComboSubfields($field);
+        }
+
+        // Repeater (plain)
+        if($field->type->className() === 'FieldtypeRepeater') {
+            $data['repeaterFields'] = [];
+            $repTemplate = $this->templates->get("repeater_" . $field->name);
+            if($repTemplate) {
+                foreach($repTemplate->fields as $repField) {
+                    $data['repeaterFields'][] = [
+                        'name'  => $repField->name,
+                        'type'  => $repField->type->className(),
+                        'label' => $repField->label,
+                    ];
+                }
+            }
+        }
+
+        // ProFields: RepeaterMatrix
+        if($field->type->className() === 'FieldtypeRepeaterMatrix') {
+            $data['matrix_types'] = $this->getMatrixTypesData($field);
+        }
+
+        return $data;
+    }
+
+    // -------------------------------------------------------------------------
+    // End ProFields helpers
+    // -------------------------------------------------------------------------
+
     /**
      * Export all templates with fields
      */
@@ -877,28 +1112,6 @@ class Context extends Process implements Module, ConfigurableModule {
                     $fieldData['options'] = $options;
                 }
 
-                // Table fields
-                if($field->type->className() === 'FieldtypeTable') {
-                    $columns = [];
-                    if($field->columns) {
-                        foreach($field->columns as $col) {
-                            $colData = [
-                                'name' => $col['name'],
-                                'label' => $col['label'],
-                                'type' => $col['type']
-                            ];
-                            if(isset($col['options'])) {
-                                $colData['options'] = explode("\n", $col['options']);
-                            }
-                            if(isset($col['selector'])) {
-                                $colData['selector'] = $col['selector'];
-                            }
-                            $columns[] = $colData;
-                        }
-                    }
-                    $fieldData['columns'] = $columns;
-                }
-
                 // Repeater fields
                 if($field->type->className() === 'FieldtypeRepeater') {
                     $fieldData['repeaterFields'] = [];
@@ -906,118 +1119,27 @@ class Context extends Process implements Module, ConfigurableModule {
                     if($repeaterTemplate) {
                         foreach($repeaterTemplate->fields as $repField) {
                             $fieldData['repeaterFields'][] = [
-                                'name' => $repField->name,
-                                'type' => $repField->type->className(),
-                                'label' => $repField->label
+                                'name'  => $repField->name,
+                                'type'  => $repField->type->className(),
+                                'label' => $repField->label,
                             ];
                         }
                     }
                 }
 
-                // RepeaterMatrix fields
-                if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    $fieldData['matrixTypes'] = [];
-                    $matrixTypes = $field->type->getMatrixTypes($field);
-                    // $matrixTypes is ['matrix_name' => id] array
-                    foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
-                        
-                        $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
-                        if($matrixTemplate && $matrixTemplate instanceof Template) {
-                            $matrixFields = [];
-                            foreach($matrixTemplate->getFields() as $matrixField) {
-                                if($matrixField instanceof Field) {
-                                    // Полная информация о поле как для обычных полей
-                                    $matrixFieldData = [
-                                        'name' => $matrixField->name,
-                                        'type' => $matrixField->type->className(),
-                                        'label' => $matrixField->label,
-                                        'description' => $matrixField->description,
-                                        'notes' => $matrixField->notes,
-                                        'required' => $matrixField->required ? 1 : 0,
-                                        'columnWidth' => $matrixField->columnWidth
-                                    ];
-                                    
-                                    // Опции для Page reference полей
-                                    if($matrixField->type->className() === 'FieldtypePage') {
-                                        $matrixFieldData['derefAsPage'] = $matrixField->derefAsPage;
-                                        if($matrixField->parent_id) {
-                                            $parent = $this->pages->get($matrixField->parent_id);
-                                            $matrixFieldData['parent'] = $parent ? $parent->path : '';
-                                        }
-                                        if($matrixField->template_id) {
-                                            $template = $this->templates->get($matrixField->template_id);
-                                            $matrixFieldData['template'] = $template ? $template->name : '';
-                                        }
-                                        if($matrixField->template_ids && is_array($matrixField->template_ids)) {
-                                            $matrixFieldData['templates'] = [];
-                                            foreach($matrixField->template_ids as $tid) {
-                                                $t = $this->templates->get($tid);
-                                                if($t) $matrixFieldData['templates'][] = $t->name;
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Опции для Options полей
-                                    if($matrixField->type->className() === 'FieldtypeOptions') {
-                                        $matrixFieldData['options'] = [];
-                                        if($matrixField->type) {
-                                            $manager = $this->wire(new \SelectableOptionManager());
-                                            foreach($manager->setField($matrixField) as $option) {
-                                                $matrixFieldData['options'][] = [
-                                                    'id' => $option->id,
-                                                    'value' => $option->value,
-                                                    'title' => $option->title
-                                                ];
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Опции для Image/File полей
-                                    if(in_array($matrixField->type->className(), ['FieldtypeImage', 'FieldtypeFile'])) {
-                                        $matrixFieldData['maxFiles'] = $matrixField->maxFiles;
-                                        $matrixFieldData['extensions'] = $matrixField->extensions;
-                                        if($matrixField->type->className() === 'FieldtypeImage') {
-                                            $matrixFieldData['maxWidth'] = $matrixField->maxWidth;
-                                            $matrixFieldData['maxHeight'] = $matrixField->maxHeight;
-                                        }
-                                    }
-                                    
-                                    // Опции для текстовых полей
-                                    if(in_array($matrixField->type->className(), ['FieldtypeText', 'FieldtypeTextarea'])) {
-                                        $matrixFieldData['maxlength'] = $matrixField->maxlength;
-                                        if($matrixField->type->className() === 'FieldtypeTextarea') {
-                                            $matrixFieldData['rows'] = $matrixField->rows;
-                                            $matrixFieldData['contentType'] = $matrixField->contentType;
-                                        }
-                                    }
-                                    
-                                    $matrixFields[] = $matrixFieldData;
-                                }
-                            }
-                            $fieldData['matrixTypes'][] = [
-                                'name' => $matrixType->name,
-                                'label' => $matrixType->label,
-                                'head' => isset($matrixType->head) ? $matrixType->head : '',
-                                'sort' => isset($matrixType->sort) ? $matrixType->sort : 0,
-                                'template' => $matrixTemplate->name,
-                                'fields' => $matrixFields
-                            ];
-                        }
-                    }
+                // ProFields: Table
+                if($field->type->className() === 'FieldtypeTable') {
+                    $fieldData['columns'] = $this->getTableColumns($field);
                 }
 
-                // Combo fields
+                // ProFields: Combo
                 if($field->type->className() === 'FieldtypeCombo') {
-                    $fieldData['comboFields'] = [];
-                    if($field->subfields) {
-                        foreach($field->subfields as $subfield) {
-                            $fieldData['comboFields'][] = [
-                                'name' => $subfield->name,
-                                'type' => $subfield->type,
-                                'label' => $subfield->label
-                            ];
-                        }
-                    }
+                    $fieldData['subfields'] = $this->getComboSubfields($field);
+                }
+
+                // ProFields: RepeaterMatrix
+                if($field->type->className() === 'FieldtypeRepeaterMatrix') {
+                    $fieldData['matrix_types'] = $this->getMatrixTypesData($field);
                 }
 
                 if($field->notes) $fieldData['notes'] = $field->notes;
@@ -1054,418 +1176,47 @@ class Context extends Process implements Module, ConfigurableModule {
     }
 
     /**
-     * Export Repeater Matrix templates separately
+     * Export RepeaterMatrix types as a dedicated file (matrix-templates.json/.toon).
+     *
+     * Uses the official getMatrixTypesInfo() API — no template-name pattern matching.
+     * Each matrix field becomes a top-level entry with its types and their full field
+     * definitions (via buildFieldData).
      */
     protected function exportMatrixTemplates() {
-        $matrixTemplates = [];
-        
-        $this->log("Starting Matrix templates export...");
-        
-        // Find all Matrix fields first
-        $matrixFields = [];
-        foreach($this->fields as $field) {
-            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                $matrixFields[$field->name] = $field;
-            }
-        }
-        
-        if(empty($matrixFields)) {
-            $this->log("No Matrix fields found on this site");
-            return [];
-        }
-        
-        $this->log("Found " . count($matrixFields) . " Matrix fields: " . implode(', ', array_keys($matrixFields)));
-        
-        // Find all templates that could be Matrix types
-        // Matrix templates can have these patterns:
-        // 1. repeater_FIELDNAME (older style)
-        // 2. repeater_matrix_FIELDNAME_INDEX (newer style)
-        // 3. repeatermatrix_FIELDNAME_INDEX (alternative)
-        $allTemplates = $this->templates->getAll();
-        $potentialMatrixTemplates = [];
-        
-        foreach($allTemplates as $template) {
-            $name = $template->name;
-            
-            // Check if this template belongs to any Matrix field
-            foreach($matrixFields as $fieldName => $matrixField) {
-                $matched = false;
-                
-                // Pattern 1: repeater_FIELDNAME (exact match for parent repeater)
-                if($name === "repeater_{$fieldName}") {
-                    $matched = true;
-                }
-                // Pattern 2: repeater_matrix_FIELDNAME_*
-                elseif(strpos($name, "repeater_matrix_{$fieldName}") === 0) {
-                    $matched = true;
-                }
-                // Pattern 3: repeatermatrix_FIELDNAME_*
-                elseif(strpos($name, "repeatermatrix_{$fieldName}") === 0) {
-                    $matched = true;
-                }
-                // Pattern 4: Check if this template is listed in matrix types
-                else {
-                    try {
-                        $matrixTypes = $matrixField->type->getMatrixTypes($matrixField);
-                        // $matrixTypes is ['matrix_name' => id] array
-                        foreach($matrixTypes as $matrixName => $matrixId) {
-                            if($matrixName === $name) {
-                                $matched = true;
-                                break;
-                            }
-                        }
-                    } catch(\Exception $e) {}
-                }
-                
-                if($matched) {
-                    $potentialMatrixTemplates[] = [
-                        'template' => $template,
-                        'field' => $matrixField
-                    ];
-                    break; // Found parent field, no need to check others
-                }
-            }
-        }
-        
-        if(empty($potentialMatrixTemplates)) {
-            $this->log("No Matrix templates found (no templates matching Matrix field patterns)");
-            return [];
-        }
-        
-        $this->log("Found " . count($potentialMatrixTemplates) . " potential Matrix templates");
-        
-        // Process each Matrix template
-        foreach($potentialMatrixTemplates as $item) {
-            $matrixTemplate = $item['template'];
-            $parentField = $item['field'];
-            
-            $this->log("Processing Matrix template: {$matrixTemplate->name} (field: {$parentField->name})");
-            
-            // Get matrix type label
-            $typeLabel = $matrixTemplate->label ?: $matrixTemplate->name;
-            
-            // Try to get proper label from matrix types
-            try {
-                $matrixTypes = $parentField->type->getMatrixTypes($parentField);
-                // $matrixTypes is ['matrix_name' => id] array
-                foreach($matrixTypes as $matrixName => $matrixId) {
-                    if($matrixName === $matrixTemplate->name) {
-                        // Get template to access its label
-                        $mt = $this->templates->get($matrixName);
-                        if($mt) {
-                            $typeLabel = $mt->label ?: $matrixName;
-                        }
-                        break;
-                    }
-                }
-            } catch(\Exception $e) {
-                $this->log("  Could not get matrix types for field {$parentField->name}: " . $e->getMessage());
-            }
-            
-            $matrixData = [
-                'name' => $matrixTemplate->name,
-                'label' => $typeLabel,
-                'parent_field' => $parentField->name,
-                'parent_field_label' => $parentField->label,
-                'fields' => []
-            ];
-            
-            // Export all fields from this matrix type
-            foreach($matrixTemplate->fields as $matrixField) {
-                if(!($matrixField instanceof Field)) continue;
-                
-                // Skip system fields
-                if($matrixField->name === 'repeater_matrix_type') continue;
-                
-                $fieldData = [
-                    'name' => $matrixField->name,
-                    'type' => $matrixField->type->className(),
-                    'label' => $matrixField->label,
-                    'description' => $matrixField->description,
-                    'notes' => $matrixField->notes,
-                    'required' => $matrixField->required ? 1 : 0,
-                    'columnWidth' => $matrixField->columnWidth,
-                    'collapsed' => $matrixField->collapsed !== Inputfield::collapsedNo ? $matrixField->collapsed : null,
-                ];
-                
-                // Page reference fields
-                if($matrixField->type instanceof FieldtypePage) {
-                    $fieldData['inputfield'] = $matrixField->inputfield;
-                    $fieldData['derefAsPage'] = $matrixField->derefAsPage;
-                    
-                    if($matrixField->parent_id) {
-                        $parent = $this->pages->get($matrixField->parent_id);
-                        $fieldData['parent'] = $parent ? $parent->path : '';
-                        $fieldData['parent_id'] = $matrixField->parent_id;
-                    }
-                    
-                    if($matrixField->template_id) {
-                        $template = $this->templates->get($matrixField->template_id);
-                        $fieldData['template'] = $template ? $template->name : '';
-                        $fieldData['template_id'] = $matrixField->template_id;
-                    }
-                    
-                    if($matrixField->template_ids && is_array($matrixField->template_ids)) {
-                        $fieldData['template_ids'] = $matrixField->template_ids;
-                        $fieldData['templates'] = [];
-                        foreach($matrixField->template_ids as $tid) {
-                            $t = $this->templates->get($tid);
-                            if($t) $fieldData['templates'][] = $t->name;
-                        }
-                    }
-                    
-                    if($matrixField->findPagesSelector) {
-                        $fieldData['selector'] = $matrixField->findPagesSelector;
-                    }
-                }
-                
-                // Options fields
-                if($matrixField->type instanceof FieldtypeOptions) {
-                    $fieldData['options'] = [];
-                    try {
-                        foreach($matrixField->type->getOptions($matrixField) as $option) {
-                            $fieldData['options'][] = [
-                                'id' => $option->id,
-                                'value' => $option->value,
-                                'title' => $option->title
-                            ];
-                        }
-                    } catch(\Exception $e) {}
-                }
-                
-                // Image/File fields
-                if($matrixField->type instanceof FieldtypeImage || $matrixField->type instanceof FieldtypeFile) {
-                    $fieldData['maxFiles'] = $matrixField->maxFiles;
-                    $fieldData['extensions'] = $matrixField->extensions;
-                    
-                    if($matrixField->type instanceof FieldtypeImage) {
-                        if($matrixField->maxWidth) $fieldData['maxWidth'] = $matrixField->maxWidth;
-                        if($matrixField->maxHeight) $fieldData['maxHeight'] = $matrixField->maxHeight;
-                    }
-                }
-                
-                // Text fields
-                if(in_array($matrixField->type->className(), ['FieldtypeText', 'FieldtypeTextarea'])) {
-                    if($matrixField->maxlength) $fieldData['maxlength'] = $matrixField->maxlength;
-                    
-                    if($matrixField->type->className() === 'FieldtypeTextarea') {
-                        $fieldData['rows'] = $matrixField->rows;
-                        $fieldData['contentType'] = $matrixField->contentType;
-                    }
-                }
-                
-                // Table fields
-                if($matrixField->type->className() === 'FieldtypeTable') {
-                    $fieldData['columns'] = [];
-                    
-                    // Table columns stored in field settings
-                    if(isset($matrixField->data) && is_array($matrixField->data)) {
-                        $maxCols = isset($matrixField->data['maxCols']) ? (int)$matrixField->data['maxCols'] : 0;
-                        
-                        for($i = 1; $i <= $maxCols; $i++) {
-                            $colName = isset($matrixField->data["col{$i}name"]) ? $matrixField->data["col{$i}name"] : null;
-                            $colLabel = isset($matrixField->data["col{$i}label"]) ? $matrixField->data["col{$i}label"] : null;
-                            $colType = isset($matrixField->data["col{$i}type"]) ? $matrixField->data["col{$i}type"] : null;
-                            
-                            if($colName) {
-                                $column = [
-                                    'name' => $colName,
-                                    'label' => $colLabel ?: $colName,
-                                    'type' => $colType ?: 'text'
-                                ];
-                                
-                                // Add column options if they exist
-                                if(isset($matrixField->data["col{$i}options"]) && !empty($matrixField->data["col{$i}options"])) {
-                                    $options = $matrixField->data["col{$i}options"];
-                                    if(is_string($options)) {
-                                        // Parse options string
-                                        $column['options'] = [];
-                                        $lines = explode("\n", $options);
-                                        foreach($lines as $line) {
-                                            $line = trim($line);
-                                            if(empty($line)) continue;
-                                            
-                                            if(strpos($line, '=') !== false) {
-                                                list($key, $value) = explode('=', $line, 2);
-                                                $column['options'][trim($key)] = trim($value);
-                                            } else {
-                                                $column['options'][] = $line;
-                                            }
-                                        }
-                                    } elseif(is_array($options)) {
-                                        $column['options'] = $options;
-                                    }
-                                }
-                                
-                                // Add selector for page fields
-                                if(isset($matrixField->data["col{$i}selector"]) && !empty($matrixField->data["col{$i}selector"])) {
-                                    $column['selector'] = $matrixField->data["col{$i}selector"];
-                                }
-                                
-                                $fieldData['columns'][] = $column;
-                            }
-                        }
-                    }
-                }
-                
-                // Combo fields (ProFields)
-                if($matrixField->type->className() === 'FieldtypeCombo') {
-                    $fieldData['subfields'] = [];
-                    
-                    if(isset($matrixField->data) && is_array($matrixField->data)) {
-                        $qty = isset($matrixField->data['qty']) ? (int)$matrixField->data['qty'] : 0;
-                        
-                        // Check if there's an order specified
-                        $order = [];
-                        if(isset($matrixField->data['order']) && !empty($matrixField->data['order'])) {
-                            $order = explode(',', $matrixField->data['order']);
-                        }
-                        
-                        if(!empty($order)) {
-                            // Use order array - it contains indices like ['1', '2', '3']
-                            foreach($order as $index) {
-                                $index = trim($index);
-                                if(empty($index)) continue;
-                                
-                                $nameKey = "i{$index}_name";
-                                $labelKey = "i{$index}_label";
-                                $typeKey = "i{$index}_type";
-                                
-                                if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
-                                    $subfield = [
-                                        'name' => $matrixField->data[$nameKey],
-                                        'label' => isset($matrixField->data[$labelKey]) ? $matrixField->data[$labelKey] : $matrixField->data[$nameKey],
-                                        'type' => $matrixField->data[$typeKey]
-                                    ];
-                                    
-                                    // Add notes and description
-                                    $notesKey = "i{$index}_notes";
-                                    $descriptionKey = "i{$index}_description";
-                                    
-                                    if(isset($matrixField->data[$notesKey]) && !empty($matrixField->data[$notesKey])) {
-                                        $subfield['notes'] = $matrixField->data[$notesKey];
-                                    }
-                                    if(isset($matrixField->data[$descriptionKey]) && !empty($matrixField->data[$descriptionKey])) {
-                                        $subfield['description'] = $matrixField->data[$descriptionKey];
-                                    }
-                                    
-                                    // Add options if available
-                                    $optionsKey = "i{$index}_options";
-                                    if(isset($matrixField->data[$optionsKey]) && !empty($matrixField->data[$optionsKey])) {
-                                        $options = $matrixField->data[$optionsKey];
-                                        if(is_string($options)) {
-                                            $subfield['options'] = [];
-                                            $lines = explode("\n", $options);
-                                            foreach($lines as $line) {
-                                                $line = trim($line);
-                                                if(empty($line)) continue;
-                                                
-                                                if(strpos($line, '=') !== false) {
-                                                    list($key, $value) = explode('=', $line, 2);
-                                                    $subfield['options'][trim($key)] = trim($value);
-                                                } else {
-                                                    $subfield['options'][] = $line;
-                                                }
-                                            }
-                                        } elseif(is_array($options)) {
-                                            $subfield['options'] = $options;
-                                        }
-                                    }
-                                    
-                                    $fieldData['subfields'][] = $subfield;
-                                }
-                            }
-                        } else {
-                            // No order specified, iterate by index
-                            for($i = 1; $i <= $qty; $i++) {
-                                $nameKey = "i{$i}_name";
-                                $labelKey = "i{$i}_label";
-                                $typeKey = "i{$i}_type";
-                                
-                                if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
-                                    $subfield = [
-                                        'name' => $matrixField->data[$nameKey],
-                                        'label' => isset($matrixField->data[$labelKey]) ? $matrixField->data[$labelKey] : $matrixField->data[$nameKey],
-                                        'type' => $matrixField->data[$typeKey]
-                                    ];
-                                    
-                                    // Add notes and description
-                                    $notesKey = "i{$i}_notes";
-                                    $descriptionKey = "i{$i}_description";
-                                    
-                                    if(isset($matrixField->data[$notesKey]) && !empty($matrixField->data[$notesKey])) {
-                                        $subfield['notes'] = $matrixField->data[$notesKey];
-                                    }
-                                    if(isset($matrixField->data[$descriptionKey]) && !empty($matrixField->data[$descriptionKey])) {
-                                        $subfield['description'] = $matrixField->data[$descriptionKey];
-                                    }
-                                    
-                                    // Add options if available
-                                    $optionsKey = "i{$i}_options";
-                                    if(isset($matrixField->data[$optionsKey]) && !empty($matrixField->data[$optionsKey])) {
-                                        $options = $matrixField->data[$optionsKey];
-                                        if(is_string($options)) {
-                                            $subfield['options'] = [];
-                                            $lines = explode("\n", $options);
-                                            foreach($lines as $line) {
-                                                $line = trim($line);
-                                                if(empty($line)) continue;
-                                                
-                                                if(strpos($line, '=') !== false) {
-                                                    list($key, $value) = explode('=', $line, 2);
-                                                    $subfield['options'][trim($key)] = trim($value);
-                                                } else {
-                                                    $subfield['options'][] = $line;
-                                                }
-                                            }
-                                        } elseif(is_array($options)) {
-                                            $subfield['options'] = $options;
-                                        }
-                                    }
-                                    
-                                    $fieldData['subfields'][] = $subfield;
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                $matrixData['fields'][] = $fieldData;
-            }
-            
-            $matrixTemplates[] = $matrixData;
-            $this->log("  Added matrix type: {$matrixTemplate->name} with " . count($matrixData['fields']) . " fields");
-        }
-        
-        // Export if there are any matrix templates
-        if(!empty($matrixTemplates)) {
-            $aiPath = $this->getContextPath();
-            
-            $this->log("Exporting " . count($matrixTemplates) . " Matrix templates");
-            
-            // JSON format
-            file_put_contents(
-                $aiPath . 'matrix-templates.json', 
-                json_encode(['matrix_templates' => $matrixTemplates], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)
-            );
-            
-            $this->log("Created matrix-templates.json");
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents(
-                    $aiPath . 'matrix-templates.toon', 
-                    $this->convertToToon(['matrix_templates' => $matrixTemplates])
-                );
-                $this->log("Created matrix-templates.toon");
-            }
-        } else {
-            $this->log("No Matrix templates found to export");
-        }
-        
-        return $matrixTemplates;
-    }
+        $output = [];
 
+        foreach($this->fields as $field) {
+            if($field->type->className() !== 'FieldtypeRepeaterMatrix') continue;
+
+            $types = $this->getMatrixTypesData($field);
+            if(empty($types)) continue;
+
+            $output[] = [
+                'field'       => $field->name,
+                'field_label' => $field->label ?: $field->name,
+                'types'       => $types,
+            ];
+        }
+
+        if(empty($output)) {
+            $this->log("No RepeaterMatrix fields found — skipping matrix-templates export.");
+            return [];
+        }
+
+        $aiPath = $this->getContextPath();
+        $data   = ['matrix_templates' => $output];
+
+        file_put_contents($aiPath . 'matrix-templates.json',
+            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        $this->log("Created matrix-templates.json (" . count($output) . " fields)");
+
+        if($this->export_toon_format) {
+            file_put_contents($aiPath . 'matrix-templates.toon', $this->convertToToon($data));
+            $this->log("Created matrix-templates.toon");
+        }
+
+        return $output;
+    }
     /**
      * Export complete site tree (templates with nested fields structure)
      * Technical overview without data - just the field architecture
@@ -1502,202 +1253,31 @@ class Context extends Process implements Module, ConfigurableModule {
                         }
                     }
                 } elseif($field->type->className() === 'FieldtypeRepeater') {
-                    // Get repeater template
                     $repeaterTemplate = $this->templates->get("name=repeater_{$field->name}");
                     if($repeaterTemplate) {
                         $fieldData['subfields'] = [];
                         foreach($repeaterTemplate->fields as $repField) {
                             $subFieldData = [
-                                'name' => $repField->name,
-                                'type' => $repField->type->className(),
-                                'label' => $repField->label
+                                'name'  => $repField->name,
+                                'type'  => $repField->type->className(),
+                                'label' => $repField->label,
                             ];
-                            
-                            // Check if repeater subfield is also a Page reference
                             if($repField->type instanceof FieldtypePage && $repField->template_id) {
                                 $refTemplate = $this->templates->get($repField->template_id);
-                                if($refTemplate) {
-                                    $subFieldData['template'] = $refTemplate->name;
-                                }
+                                if($refTemplate) $subFieldData['template'] = $refTemplate->name;
                             }
-                            
                             $fieldData['subfields'][] = $subFieldData;
                         }
                     }
                 } elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    $fieldData['matrix_types'] = [];
-                    
-                    // Find all matrix templates for this field
-                    $allTemplates = $this->templates->getAll();
-                    foreach($allTemplates as $t) {
-                        if(strpos($t->name, "repeater_{$field->name}") === 0 || 
-                           strpos($t->name, "repeater_matrix_{$field->name}") === 0 ||
-                           strpos($t->name, "repeatermatrix_{$field->name}") === 0) {
-                            
-                            $matrixType = [
-                                'name' => $t->name,
-                                'label' => $t->label ?: $t->name,
-                                'subfields' => []
-                            ];
-                            
-                            foreach($t->fields as $matrixField) {
-                                if($matrixField->name === 'repeater_matrix_type') continue;
-                                
-                                $subFieldData = [
-                                    'name' => $matrixField->name,
-                                    'type' => $matrixField->type->className(),
-                                    'label' => $matrixField->label
-                                ];
-                                
-                                // Page reference in matrix
-                                if($matrixField->type instanceof FieldtypePage && $matrixField->template_id) {
-                                    $refTemplate = $this->templates->get($matrixField->template_id);
-                                    if($refTemplate) {
-                                        $subFieldData['template'] = $refTemplate->name;
-                                    }
-                                }
-                                // Table in matrix
-                                elseif($matrixField->type->className() === 'FieldtypeTable') {
-                                    $subFieldData['columns'] = [];
-                                    if(isset($matrixField->data) && is_array($matrixField->data)) {
-                                        $maxCols = isset($matrixField->data['maxCols']) ? (int)$matrixField->data['maxCols'] : 0;
-                                        for($i = 1; $i <= $maxCols; $i++) {
-                                            $colName = isset($matrixField->data["col{$i}name"]) ? $matrixField->data["col{$i}name"] : null;
-                                            if($colName) {
-                                                $subFieldData['columns'][] = [
-                                                    'name' => $colName,
-                                                    'type' => isset($matrixField->data["col{$i}type"]) ? $matrixField->data["col{$i}type"] : 'text'
-                                                ];
-                                            }
-                                        }
-                                    }
-                                }
-                                // Combo in matrix
-                                elseif($matrixField->type->className() === 'FieldtypeCombo') {
-                                    $subFieldData['subfields'] = [];
-                                    if(isset($matrixField->data) && is_array($matrixField->data)) {
-                                        $qty = isset($matrixField->data['qty']) ? (int)$matrixField->data['qty'] : 0;
-                                        for($i = 1; $i <= $qty; $i++) {
-                                            $nameKey = "i{$i}_name";
-                                            $typeKey = "i{$i}_type";
-                                            if(isset($matrixField->data[$nameKey]) && isset($matrixField->data[$typeKey])) {
-                                                $subFieldData['subfields'][] = [
-                                                    'name' => $matrixField->data[$nameKey],
-                                                    'type' => $matrixField->data[$typeKey]
-                                                ];
-                                            }
-                                        }
-                                    }
-                                }
-                                // Nested Matrix (Matrix inside Matrix)
-                                elseif($matrixField->type->className() === 'FieldtypeRepeaterMatrix') {
-                                    $subFieldData['matrix_types'] = [];
-                                    
-                                    // Find all nested matrix templates for this field
-                                    foreach($allTemplates as $nestedT) {
-                                        if(strpos($nestedT->name, "repeater_{$matrixField->name}") === 0 || 
-                                           strpos($nestedT->name, "repeater_matrix_{$matrixField->name}") === 0 ||
-                                           strpos($nestedT->name, "repeatermatrix_{$matrixField->name}") === 0) {
-                                            
-                                            $nestedMatrixType = [
-                                                'name' => $nestedT->name,
-                                                'label' => $nestedT->label ?: $nestedT->name,
-                                                'subfields' => []
-                                            ];
-                                            
-                                            foreach($nestedT->fields as $nestedField) {
-                                                if($nestedField->name === 'repeater_matrix_type') continue;
-                                                
-                                                $nestedSubFieldData = [
-                                                    'name' => $nestedField->name,
-                                                    'type' => $nestedField->type->className(),
-                                                    'label' => $nestedField->label
-                                                ];
-                                                
-                                                // Page reference in nested matrix
-                                                if($nestedField->type instanceof FieldtypePage && $nestedField->template_id) {
-                                                    $refTemplate = $this->templates->get($nestedField->template_id);
-                                                    if($refTemplate) {
-                                                        $nestedSubFieldData['template'] = $refTemplate->name;
-                                                    }
-                                                }
-                                                // Table in nested matrix
-                                                elseif($nestedField->type->className() === 'FieldtypeTable') {
-                                                    $nestedSubFieldData['columns'] = [];
-                                                    if(isset($nestedField->data) && is_array($nestedField->data)) {
-                                                        $maxCols = isset($nestedField->data['maxCols']) ? (int)$nestedField->data['maxCols'] : 0;
-                                                        for($i = 1; $i <= $maxCols; $i++) {
-                                                            $colName = isset($nestedField->data["col{$i}name"]) ? $nestedField->data["col{$i}name"] : null;
-                                                            if($colName) {
-                                                                $nestedSubFieldData['columns'][] = [
-                                                                    'name' => $colName,
-                                                                    'type' => isset($nestedField->data["col{$i}type"]) ? $nestedField->data["col{$i}type"] : 'text'
-                                                                ];
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                // Combo in nested matrix
-                                                elseif($nestedField->type->className() === 'FieldtypeCombo') {
-                                                    $nestedSubFieldData['subfields'] = [];
-                                                    if(isset($nestedField->data) && is_array($nestedField->data)) {
-                                                        $qty = isset($nestedField->data['qty']) ? (int)$nestedField->data['qty'] : 0;
-                                                        for($i = 1; $i <= $qty; $i++) {
-                                                            $nameKey = "i{$i}_name";
-                                                            $typeKey = "i{$i}_type";
-                                                            if(isset($nestedField->data[$nameKey]) && isset($nestedField->data[$typeKey])) {
-                                                                $nestedSubFieldData['subfields'][] = [
-                                                                    'name' => $nestedField->data[$nameKey],
-                                                                    'type' => $nestedField->data[$typeKey]
-                                                                ];
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                
-                                                $nestedMatrixType['subfields'][] = $nestedSubFieldData;
-                                            }
-                                            
-                                            $subFieldData['matrix_types'][] = $nestedMatrixType;
-                                        }
-                                    }
-                                }
-                                
-                                $matrixType['subfields'][] = $subFieldData;
-                            }
-                            
-                            $fieldData['matrix_types'][] = $matrixType;
-                        }
-                    }
+                    // ProFields: use official API via helper
+                    $fieldData['matrix_types'] = $this->getMatrixTypesData($field);
                 } elseif($field->type->className() === 'FieldtypeTable') {
-                    $fieldData['columns'] = [];
-                    if(isset($field->data) && is_array($field->data)) {
-                        $maxCols = isset($field->data['maxCols']) ? (int)$field->data['maxCols'] : 0;
-                        for($i = 1; $i <= $maxCols; $i++) {
-                            $colName = isset($field->data["col{$i}name"]) ? $field->data["col{$i}name"] : null;
-                            if($colName) {
-                                $fieldData['columns'][] = [
-                                    'name' => $colName,
-                                    'type' => isset($field->data["col{$i}type"]) ? $field->data["col{$i}type"] : 'text'
-                                ];
-                            }
-                        }
-                    }
+                    // ProFields: use official API via helper
+                    $fieldData['columns'] = $this->getTableColumns($field);
                 } elseif($field->type->className() === 'FieldtypeCombo') {
-                    $fieldData['subfields'] = [];
-                    if(isset($field->data) && is_array($field->data)) {
-                        $qty = isset($field->data['qty']) ? (int)$field->data['qty'] : 0;
-                        for($i = 1; $i <= $qty; $i++) {
-                            $nameKey = "i{$i}_name";
-                            $typeKey = "i{$i}_type";
-                            if(isset($field->data[$nameKey]) && isset($field->data[$typeKey])) {
-                                $fieldData['subfields'][] = [
-                                    'name' => $field->data[$nameKey],
-                                    'type' => $field->data[$typeKey]
-                                ];
-                            }
-                        }
-                    }
+                    // ProFields: use official API via helper
+                    $fieldData['subfields'] = $this->getComboSubfields($field);
                 }
                 
                 $templateData['fields'][] = $fieldData;
@@ -1850,22 +1430,17 @@ class Context extends Process implements Module, ConfigurableModule {
                                 'id' => $repeaterItem->id
                             ];
                             
-                            // For RepeaterMatrix add type and label
+                            // For RepeaterMatrix add type name and label
                             if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                                $itemData['type'] = $repeaterItem->type;
-                                // Get matrix type label
-                                try {
-                                    $matrixTypes = $field->type->getMatrixTypes($field);
-                                    // $matrixTypes is ['matrix_name' => id] array
-                                    foreach($matrixTypes as $matrixName => $matrixId) {
-                                        if($matrixName === $repeaterItem->type) {
-                                            // Get template to access label
-                                            $mt = $this->templates->get($matrixName);
-                                            $itemData['type_label'] = $mt ? ($mt->label ?: $matrixName) : $matrixName;
-                                            break;
-                                        }
+                                $matrixTypeName = $field->type->getMatrixTypeName((int)$repeaterItem->get('repeater_matrix_type'), $field);
+                                $itemData['type'] = $matrixTypeName ?: '';
+                                if($matrixTypeName) {
+                                    try {
+                                        $itemData['type_label'] = $field->type->getMatrixTypeLabel($matrixTypeName, $field);
+                                    } catch(\Exception $e) {
+                                        $itemData['type_label'] = $matrixTypeName;
                                     }
-                                } catch(\Exception $e) {}
+                                }
                             }
                             
                             // Export repeater item fields with proper types
@@ -2037,14 +1612,23 @@ class Context extends Process implements Module, ConfigurableModule {
                     if(!$matrixItems || !$matrixItems->count()) continue;
                     
                     foreach($matrixItems as $matrixItem) {
-                        // Get the matrix type template name
-                        $matrixTypeName = $matrixItem->template->name;
+                        // Get matrix type name via official API
+                        $matrixTypeInt = (int)$matrixItem->get('repeater_matrix_type');
+                        $matrixTypeName = $matrixField->type->getMatrixTypeName($matrixTypeInt, $matrixField);
+                        if(!$matrixTypeName) continue; // skip items with unknown type
+                        
+                        $matrixTypeLabel = '';
+                        try {
+                            $matrixTypeLabel = $matrixField->type->getMatrixTypeLabel($matrixTypeName, $matrixField);
+                        } catch(\Exception $e) {
+                            $matrixTypeLabel = $matrixTypeName;
+                        }
                         
                         if(!isset($allMatrixSamples[$matrixTypeName])) {
                             $allMatrixSamples[$matrixTypeName] = [
-                                'template' => $matrixTypeName,
-                                'label' => $matrixItem->template->label ?: $matrixTypeName,
-                                'parent_field' => $matrixField->name,
+                                'type_name'         => $matrixTypeName,
+                                'type_label'        => $matrixTypeLabel,
+                                'parent_field'      => $matrixField->name,
                                 'parent_field_label' => $matrixField->label,
                                 'samples' => []
                             ];
@@ -2056,8 +1640,9 @@ class Context extends Process implements Module, ConfigurableModule {
                         }
                         
                         $itemData = [
-                            'id' => $matrixItem->id,
-                            'type' => $matrixItem->type,
+                            'id'         => $matrixItem->id,
+                            'type'       => $matrixTypeName,
+                            'type_label' => $matrixTypeLabel,
                             'fields' => []
                         ];
                         
@@ -2208,87 +1793,69 @@ class Context extends Process implements Module, ConfigurableModule {
                     $property['type'] = 'array';
                     $property['items'] = ['$ref' => '#/definitions/Image'];
                 } 
-                // Table fields
-                elseif($field->type->className() === 'FieldtypeTable') {
-                    $property['type'] = 'array';
-                    $property['description'] .= ' (Table field)';
-                    if($field->columns) {
-                        $property['items'] = [
-                            'type' => 'object',
-                            'properties' => []
-                        ];
-                        foreach($field->columns as $col) {
-                            $property['items']['properties'][$col['name']] = [
-                                'type' => 'string',
-                                'description' => $col['label']
-                            ];
-                        }
-                    }
-                }
                 // Repeater fields
                 elseif($field->type->className() === 'FieldtypeRepeater') {
                     $property['type'] = 'array';
                     $property['description'] .= ' (Repeater field)';
                     $repeaterTemplate = $this->templates->get("repeater_" . $field->name);
                     if($repeaterTemplate) {
-                        $property['items'] = [
-                            'type' => 'object',
-                            'properties' => []
-                        ];
+                        $property['items'] = ['type' => 'object', 'properties' => []];
                         foreach($repeaterTemplate->fields as $repField) {
                             $property['items']['properties'][$repField->name] = [
-                                'type' => 'string',
-                                'description' => $repField->label
+                                'type' => 'string', 'description' => $repField->label
                             ];
                         }
                     }
                 }
-                // RepeaterMatrix fields
+                // ProFields: Table — JSON Schema array of row objects
+                elseif($field->type->className() === 'FieldtypeTable') {
+                    $property['type'] = 'array';
+                    $property['description'] .= ' (Table field)';
+                    $cols = $this->getTableColumns($field);
+                    if(!empty($cols)) {
+                        $property['items'] = ['type' => 'object', 'properties' => []];
+                        foreach($cols as $col) {
+                            $property['items']['properties'][$col['name']] = [
+                                'type' => 'string', 'description' => $col['label']
+                            ];
+                        }
+                    }
+                }
+                // ProFields: RepeaterMatrix — JSON Schema oneOf per type
                 elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
                     $property['type'] = 'array';
                     $property['description'] .= ' (RepeaterMatrix field)';
-                    $matrixTypes = $field->type->getMatrixTypes($field);
-                    $property['items'] = [
-                        'oneOf' => []
-                    ];
-                    // $matrixTypes is ['matrix_name' => id] array
-                    foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
-                        
-                        $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
-                        if($matrixTemplate && $matrixTemplate instanceof Template) {
-                            $matrixSchema = [
-                                'type' => 'object',
-                                'properties' => [
-                                    'type' => [
-                                        'type' => 'string',
-                                        'const' => $matrixTypeName,
-                                        'description' => $matrixTemplate->label ?: $matrixTypeName
-                                    ]
-                                ],
-                                'required' => ['type']
+                    $property['items'] = ['oneOf' => []];
+                    foreach($this->getMatrixTypesData($field) as $typeInfo) {
+                        $matrixSchema = [
+                            'type' => 'object',
+                            'properties' => [
+                                'type' => [
+                                    'type' => 'string',
+                                    'const' => $typeInfo['name'],
+                                    'description' => $typeInfo['label']
+                                ]
+                            ],
+                            'required' => ['type']
+                        ];
+                        foreach($typeInfo['fields'] as $mf) {
+                            $matrixSchema['properties'][$mf['name']] = [
+                                'type' => 'string', 'description' => $mf['label'] ?? $mf['name']
                             ];
-                            foreach($matrixTemplate->getFields() as $matrixField) {
-                                if($matrixField instanceof Field) {
-                                    $matrixSchema['properties'][$matrixField->name] = [
-                                        'type' => 'string',
-                                        'description' => $matrixField->label
-                                    ];
-                                }
-                            }
-                            $property['items']['oneOf'][] = $matrixSchema;
                         }
+                        $property['items']['oneOf'][] = $matrixSchema;
                     }
                 }
-                // Combo fields
+                // ProFields: Combo — JSON Schema object with subfield properties
                 elseif($field->type->className() === 'FieldtypeCombo') {
                     $property['type'] = 'object';
                     $property['description'] .= ' (Combo field)';
-                    if($field->subfields) {
+                    $subs = $this->getComboSubfields($field);
+                    if(!empty($subs)) {
                         $property['properties'] = [];
-                        foreach($field->subfields as $subfield) {
-                            $property['properties'][$subfield->name] = [
-                                'type' => 'string',
-                                'description' => $subfield->label
+                        foreach($subs as $sub) {
+                            $property['properties'][$sub['name']] = [
+                                'type' => 'string', 'description' => $sub['label']
                             ];
                         }
                     }
@@ -2415,23 +1982,25 @@ class Context extends Process implements Module, ConfigurableModule {
             $definitions['field_types'][$className]['examples'][] = $field->name;
 
             // Detailed definitions for complex fields
-            if($className === 'FieldtypeTable' && $field->columns) {
-                $definitions['custom_fields'][$field->name] = [
-                    'name' => $field->name,
-                    'label' => $field->label,
-                    'type' => 'Table',
-                    'columns' => [],
-                    'usage_example' => $field->notes ?: "Table field with structured data"
-                ];
-
-                foreach($field->columns as $col) {
-                    $definitions['custom_fields'][$field->name]['columns'][] = [
-                        'name' => $col['name'],
-                        'label' => $col['label'],
-                        'type' => $col['type'],
-                        'purpose' => $col['label']
+            // ProFields: Table
+            if($className === 'FieldtypeTable') {
+                $cols = $this->getTableColumns($field);
+                $colsList = [];
+                foreach($cols as $col) {
+                    $colsList[] = [
+                        'name'    => $col['name'],
+                        'label'   => $col['label'],
+                        'type'    => $col['type'],
+                        'purpose' => $col['label'],
                     ];
                 }
+                $definitions['custom_fields'][$field->name] = [
+                    'name'          => $field->name,
+                    'label'         => $field->label,
+                    'type'          => 'Table',
+                    'columns'       => $colsList,
+                    'usage_example' => $field->notes ?: "Table field with structured data",
+                ];
             }
 
             if($className === 'FieldtypeRepeater') {
@@ -2456,62 +2025,55 @@ class Context extends Process implements Module, ConfigurableModule {
                 }
             }
 
-            // RepeaterMatrix fields
+            // ProFields: RepeaterMatrix
             if($className === 'FieldtypeRepeaterMatrix') {
-                $definitions['custom_fields'][$field->name] = [
-                    'name' => $field->name,
-                    'label' => $field->label,
-                    'type' => 'RepeaterMatrix',
-                    'matrix_types' => [],
-                    'usage_example' => $field->notes ?: "Matrix of different repeater types"
-                ];
-
-                $matrixTypes = $field->type->getMatrixTypes($field);
-                // $matrixTypes is ['matrix_name' => id] array
-                foreach($matrixTypes as $matrixTypeName => $matrixTypeId) {
-                    
-                    $matrixTemplate = $this->wire('templates')->get($matrixTypeName);
-                    if($matrixTemplate && $matrixTemplate instanceof Template) {
-                        $matrixFields = [];
-                        foreach($matrixTemplate->getFields() as $matrixField) {
-                            if($matrixField instanceof Field) {
-                                $matrixFields[] = [
-                                    'name' => $matrixField->name,
-                                    'type' => $matrixField->type->className(),
-                                    'label' => $matrixField->label,
-                                    'purpose' => $matrixField->description ?: $matrixField->label
-                                ];
-                            }
-                        }
-                        $definitions['custom_fields'][$field->name]['matrix_types'][] = [
-                            'name' => $matrixType->name,
-                            'label' => $matrixType->label,
-                            'fields' => $matrixFields
+                $typesData = $this->getMatrixTypesData($field);
+                $matrixTypesList = [];
+                foreach($typesData as $typeInfo) {
+                    $mfList = [];
+                    foreach($typeInfo['fields'] as $mf) {
+                        $mfList[] = [
+                            'name'    => $mf['name'],
+                            'type'    => $mf['type'],
+                            'label'   => $mf['label'] ?? $mf['name'],
+                            'purpose' => (!empty($mf['description']) ? $mf['description'] : ($mf['label'] ?? $mf['name'])),
                         ];
                     }
+                    $matrixTypesList[] = [
+                        'name'   => $typeInfo['name'],
+                        'label'  => $typeInfo['label'],
+                        'head'   => $typeInfo['head'],
+                        'fields' => $mfList,
+                    ];
                 }
+                $definitions['custom_fields'][$field->name] = [
+                    'name'          => $field->name,
+                    'label'         => $field->label,
+                    'type'          => 'RepeaterMatrix',
+                    'matrix_types'  => $matrixTypesList,
+                    'usage_example' => $field->notes ?: "Matrix of different repeater types",
+                ];
             }
 
-            // Combo fields
+            // ProFields: Combo
             if($className === 'FieldtypeCombo') {
-                $definitions['custom_fields'][$field->name] = [
-                    'name' => $field->name,
-                    'label' => $field->label,
-                    'type' => 'Combo',
-                    'subfields' => [],
-                    'usage_example' => $field->notes ?: "Combined set of subfields"
-                ];
-
-                if($field->subfields) {
-                    foreach($field->subfields as $subfield) {
-                        $definitions['custom_fields'][$field->name]['subfields'][] = [
-                            'name' => $subfield->name,
-                            'type' => $subfield->type,
-                            'label' => $subfield->label,
-                            'purpose' => $subfield->label
-                        ];
-                    }
+                $subsData = $this->getComboSubfields($field);
+                $subsList = [];
+                foreach($subsData as $sub) {
+                    $subsList[] = [
+                        'name'    => $sub['name'],
+                        'type'    => $sub['type'],
+                        'label'   => $sub['label'],
+                        'purpose' => (!empty($sub['description']) ? $sub['description'] : $sub['label']),
+                    ];
                 }
+                $definitions['custom_fields'][$field->name] = [
+                    'name'          => $field->name,
+                    'label'         => $field->label,
+                    'type'          => 'Combo',
+                    'subfields'     => $subsList,
+                    'usage_example' => $field->notes ?: "Combined set of subfields",
+                ];
             }
         }
 
@@ -3975,6 +3537,63 @@ SKILL;
     /**
      * Main export function
      */
+    /**
+     * Download context folder as ZIP archive
+     */
+    public function executeDownload() {
+        $contextPath = $this->getContextPath();
+        
+        if(!is_dir($contextPath)) {
+            $this->error("Nothing to download - export context first.");
+            $this->session->redirect($this->page->url);
+            return;
+        }
+        
+        $siteName = $this->sanitizer->pageName($this->config->httpHost ?: 'context');
+        $filename = 'context-' . $siteName . '-' . date('Ymd-His') . '.zip';
+        
+        $zip = new \ZipArchive();
+        $tmpFile = tempnam(sys_get_temp_dir(), 'ctx_') . '.zip';
+        
+        if($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            $this->error("Failed to create ZIP archive.");
+            $this->session->redirect($this->page->url);
+            return;
+        }
+        
+        $baseName = basename(rtrim($contextPath, '/'));
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($contextPath, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        
+        foreach($iterator as $file) {
+            $filePath = $file->getRealPath();
+            $relativePath = $baseName . '/' . ltrim(substr($filePath, strlen(rtrim($contextPath, '/'))), '/');
+            
+            if($file->isDir()) {
+                $zip->addEmptyDir($relativePath);
+            } else {
+                $zip->addFile($filePath, $relativePath);
+            }
+        }
+        
+        $zip->close();
+        
+        // Stream the ZIP to browser
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . filesize($tmpFile));
+        header('Cache-Control: no-cache, no-store, must-revalidate');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+        
+        ob_end_clean();
+        readfile($tmpFile);
+        unlink($tmpFile);
+        exit;
+    }
+
     public function executeExport() {
         $startTime = microtime(true);
         
@@ -4348,8 +3967,12 @@ SKILL;
         
         $out = '';
         
-        // Header
-        $out .= "<h1 class='uk-h2 uk-margin-remove-top'>Context</h1>";
+        // Accent colours for metric cards — always use CSS variables
+        // (both AdminThemeUikit variants define --pw-main-color)
+        $accentBg   = 'var(--pw-main-color)';
+        $accentFg   = '#fff';
+        $accentMeta = 'rgba(255,255,255,0.75)';
+        $accentSub  = 'rgba(255,255,255,0.85)';
         
         // Metrics cards using UIkit grid (adaptive: 2 cols mobile, 3 cols tablet, 6 cols desktop)
         $out .= "<div class='uk-grid-small uk-child-width-1-2 uk-child-width-1-3@s uk-child-width-1-6@m uk-margin' uk-grid>";
@@ -4378,6 +4001,7 @@ SKILL;
         $out .= "<div class='uk-text-small uk-text-muted'>Published</div>";
         $out .= "</div></div>";
         
+        // Accent cards — always visible, dashes when not yet exported
         if($exists) {
             $fileCount = 0;
             $iterator = new \RecursiveIteratorIterator(
@@ -4386,63 +4010,50 @@ SKILL;
             foreach($iterator as $file) {
                 if($file->isFile()) $fileCount++;
             }
-            
-            $folderSize = $this->getFolderSize($contextPath);
-            $readmePath = $contextPath . 'README.md';
+            $folderSize   = $this->getFolderSize($contextPath);
+            $readmePath   = $contextPath . 'README.md';
             $lastModified = file_exists($readmePath) ? filemtime($readmePath) : null;
-            
-            // Exported Files
-            $out .= "<div>";
-            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
-            $out .= "<div class='uk-text-meta uk-text-uppercase'>Exported Files</div>";
-            $out .= "<div class='uk-h2 uk-margin-remove'>{$fileCount}</div>";
-            $out .= "<div class='uk-text-small'>Ready</div>";
-            $out .= "</div></div>";
-            
-            // Export Size
-            $out .= "<div>";
-            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
-            $out .= "<div class='uk-text-meta uk-text-uppercase'>Export Size</div>";
-            $out .= "<div class='uk-h2 uk-margin-remove uk-text-nowrap'>" . $this->formatBytes($folderSize) . "</div>";
-            $out .= "<div class='uk-text-small'>Total</div>";
-            $out .= "</div></div>";
-            
-            // Last Export
-            $out .= "<div>";
-            $out .= "<div class='uk-card uk-card-primary uk-card-body uk-text-center'>";
-            $out .= "<div class='uk-text-meta uk-text-uppercase'>Last Export</div>";
-            if($lastModified) {
-                $diff = time() - $lastModified;
-                if($diff < 60) {
-                    $timeAgo = $diff . 's ago';
-                } elseif($diff < 3600) {
-                    $timeAgo = floor($diff / 60) . 'm ago';
-                } elseif($diff < 86400) {
-                    $timeAgo = floor($diff / 3600) . 'h ago';
-                } elseif($diff < 604800) {
-                    $timeAgo = floor($diff / 86400) . 'd ago';
-                } else {
-                    $timeAgo = date('M j', $lastModified);
-                }
-                
-                $out .= "<div class='uk-h2 uk-margin-remove'>{$timeAgo}</div>";
-                $out .= "<div class='uk-text-small'>" . date('M j, H:i', $lastModified) . "</div>";
-            } else {
-                $out .= "<div class='uk-h2 uk-margin-remove'>-</div>";
-                $out .= "<div class='uk-text-small'>Never</div>";
-            }
-            $out .= "</div></div>";
-            
         } else {
-            // Status: Not Exported
-            $out .= "<div>";
-            $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
-            $out .= "<div class='uk-text-meta uk-text-uppercase'>Status</div>";
-            $out .= "<div class='uk-h2 uk-margin-remove uk-text-warning'>Not Exported</div>";
-            $out .= "<div class='uk-text-small uk-text-muted'>Click below</div>";
-            $out .= "</div></div>";
+            $fileCount    = null;
+            $folderSize   = null;
+            $lastModified = null;
         }
-        
+
+        // Exported Files
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
+        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Exported Files</div>";
+        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;color:{$accentFg}'>" . ($exists ? $fileCount : '&mdash;') . "</div>";
+        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>" . ($exists ? 'Ready' : 'Not exported') . "</div>";
+        $out .= "</div></div>";
+
+        // Export Size
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
+        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Export Size</div>";
+        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;white-space:nowrap;color:{$accentFg}'>" . ($exists ? $this->formatBytes($folderSize) : '&mdash;') . "</div>";
+        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>Total</div>";
+        $out .= "</div></div>";
+
+        // Last Export
+        $timeAgo      = '&mdash;';
+        $timeAbsolute = '';
+        if($lastModified) {
+            $diff = time() - $lastModified;
+            if($diff < 60)         $timeAgo = $diff . 's ago';
+            elseif($diff < 3600)   $timeAgo = floor($diff / 60) . 'm ago';
+            elseif($diff < 86400)  $timeAgo = floor($diff / 3600) . 'h ago';
+            elseif($diff < 604800) $timeAgo = floor($diff / 86400) . 'd ago';
+            else                   $timeAgo = date('M j', $lastModified);
+            $timeAbsolute = date('M j, H:i', $lastModified);
+        }
+        $out .= "<div>";
+        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
+        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Last Export</div>";
+        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;color:{$accentFg}'>{$timeAgo}</div>";
+        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>" . ($timeAbsolute ?: 'Never') . "</div>";
+        $out .= "</div></div>";
+
         $out .= "</div>"; // end metrics grid
         
         // TOON Format Banner (if enabled)
@@ -4474,9 +4085,15 @@ SKILL;
             $out .= "</a>";
         }
         
-        $out .= "<a href='" . $this->config->urls->admin . "module/edit?name=Context' class='uk-button uk-button-default'>";
+        $out .= "<a href='" . $this->config->urls->admin . "module/edit?name=Context' class='uk-button uk-button-default uk-margin-small-right'>";
         $out .= "<i class='fa fa-cog'></i> Go to Module's Settings";
         $out .= "</a>";
+        
+        if($exists) {
+            $out .= "<a href='./download/' class='uk-button uk-button-default'>";
+            $out .= "<i class='fa fa-file-archive-o'></i> Download Archive";
+            $out .= "</a>";
+        }
         
         if($exists) {
             $out .= "<div class='uk-text-small uk-text-muted uk-margin-small-top'>";
@@ -4947,238 +4564,205 @@ SKILL;
 
         $data = array_merge(self::$configDefaults, $data);
 
-        // Site Type Selection
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Site Type';
-        $fieldset->collapsed = Inputfield::collapsedNo;
-
+        // ── Row 1: Site Type + CSS Framework (50/50) ──────────────────────────
         $f = $modules->get('InputfieldSelect');
         $f->name = 'site_type';
-        $f->label = 'What type of site are you building?';
-        $f->description = 'This determines which code examples and snippets will be generated';
-        
-        // Add options with descriptions
-        $f->addOption('generic', 'Generic / Mixed Content — General purpose site with various content types');
-        $f->addOption('blog', 'Blog / News / Magazine — Sites with articles, posts, authors, categories');
-        $f->addOption('ecommerce', 'E-commerce / Online Store — Products, shopping cart, orders, inventory');
-        $f->addOption('business', 'Business / Portfolio / Agency — Services, team, projects, case studies');
-        $f->addOption('catalog', 'Catalog / Directory / Listings — Brands, categories, hierarchical data');
-        
+        $f->label = 'Site Type';
+        $f->addOption('generic', 'Generic / Mixed Content');
+        $f->addOption('blog', 'Blog / News / Magazine');
+        $f->addOption('ecommerce', 'E-commerce / Online Store');
+        $f->addOption('business', 'Business / Portfolio / Agency');
+        $f->addOption('catalog', 'Catalog / Directory / Listings');
         $f->value = $data['site_type'];
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-        // CSS Framework Selection
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'CSS Framework';
-        $fieldset->description = 'Choose your CSS framework for more accurate code generation';
-        $fieldset->collapsed = Inputfield::collapsedNo;
+        $f->columnWidth = 50;
+        $inputfields->add($f);
 
         $f = $modules->get('InputfieldSelect');
         $f->name = 'css_framework';
         $f->label = 'CSS Framework';
-        $f->description = 'Select your CSS framework or use auto-detect';
-        
-        // Add options
         $f->addOption('auto', 'Auto-detect (recommended)');
         $f->addOption('tailwind', 'Tailwind CSS');
         $f->addOption('bootstrap', 'Bootstrap');
         $f->addOption('uikit', 'UIkit');
         $f->addOption('vanilla', 'Vanilla CSS / Custom');
-        $f->addOption('none', 'None (no CSS framework)');
-        
+        $f->addOption('none', 'None');
         $f->value = $data['css_framework'];
-        $f->notes = 'Auto-detect scans your templates and package.json. Choose manually if detection is incorrect.';
-        $fieldset->add($f);
+        $f->columnWidth = 50;
+        $inputfields->add($f);
 
-        $inputfields->add($fieldset);
-
-        // Export Path Configuration
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Export Path';
-        $fieldset->description = 'Configure where context files are exported';
-        $fieldset->collapsed = Inputfield::collapsedNo;
-
+        // ── Export Path (full width) ───────────────────────────────────────────
         $f = $modules->get('InputfieldText');
         $f->name = 'export_path';
-        $f->label = 'Export Directory Path';
-        $f->description = 'Path where context files will be exported. Default: site/assets/cache/context/ (protected by ProcessWire)';
-        $f->notes = 'Examples: site/assets/cache/context/ (default, PW protected) | .junie/skills/docs (for Junie AI) | site/assets/context/ (custom path with .htaccess)';
+        $f->label = 'Export Path';
+        $f->notes = 'Default: `site/assets/cache/context/` (PW-protected). Also accepts absolute paths and paths like `.junie/skills/docs`.';
         $f->value = $data['export_path'];
         $f->columnWidth = 100;
-        $fieldset->add($f);
+        $inputfields->add($f);
 
-        $inputfields->add($fieldset);
-
-        // Export Formats
+        // ── Export Options fieldset ────────────────────────────────────────────
         $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Export Formats';
-        $fieldset->description = 'Choose which file formats to generate';
+        $fieldset->label = 'Export Options';
         $fieldset->collapsed = Inputfield::collapsedNo;
+        $fieldset->icon = 'sliders';
 
+        // TOON — 50%
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'export_toon_format';
-        $f->label = 'Export TOON Format (AI-Optimized)';
-        $f->description = 'Generate .toon files alongside .json for AI assistants';
-        $f->notes = '**TOON format uses 30-60% fewer tokens** than JSON when uploaded to Claude, ChatGPT, or other LLMs. Highly recommended for AI development!';
+        $f->label = 'TOON Format (AI-Optimized)';
+        $f->notes = 'Uses 30-60% fewer tokens than JSON';
         $f->icon = 'magic';
         $f->checked = $data['export_toon_format'] ? 'checked' : '';
+        $f->columnWidth = 50;
         $fieldset->add($f);
 
+        // SKILL.md — 50%
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'generate_skill_md';
-        $f->label = 'Generate SKILL.md for AI Agents';
-        $f->description = 'Create SKILL.md file for Cline, Junie, and other AI coding agents';
-        $f->notes = 'Generates a structured skill file that helps AI agents understand how to use the exported context. Required for Cline (PHPStorm/VSCode) and Junie integration.';
+        $f->label = 'Generate SKILL.md';
+        $f->notes = 'For Cline, Junie, and other AI agents';
         $f->icon = 'robot';
         $f->checked = $data['generate_skill_md'] ? 'checked' : '';
+        $f->columnWidth = 50;
         $fieldset->add($f);
 
-        $inputfields->add($fieldset);
+        // API Docs — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_api_docs';
+        $f->label = 'API Documentation';
+        $f->notes = '→ `api/` JSON schemas';
+        $f->checked = $data['export_api_docs'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
 
-        // Samples
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Content Sampling';
-        $fieldset->collapsed = Inputfield::collapsedNo;
+        // Field Definitions — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_field_definitions';
+        $f->label = 'Field Definitions';
+        $f->notes = '→ `metadata/field-definitions.json`';
+        $f->checked = $data['export_field_definitions'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
 
+        // URL Routes — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_routes';
+        $f->label = 'URL Routes';
+        $f->notes = '→ `metadata/routes.json`';
+        $f->checked = $data['export_routes'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        // Performance Metrics — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_performance';
+        $f->label = 'Performance Metrics';
+        $f->notes = '→ `metadata/performance.json`';
+        $f->checked = $data['export_performance'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        // Code Snippets — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_snippets';
+        $f->label = 'Code Snippets';
+        $f->notes = '→ `snippets/*.php`';
+        $f->checked = $data['export_snippets'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        // AI Prompts — 50%
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'export_prompts';
+        $f->label = 'AI Prompts';
+        $f->notes = '→ `prompts/project-context.md`';
+        $f->checked = $data['export_prompts'] ? 'checked' : '';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        // Content Samples checkbox — 50%
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'export_samples';
-        $f->label = 'Export Content Samples';
-        $f->description = 'Export real page examples for each template';
-        $f->notes = 'Creates: **samples/** folder with JSON files for each template';
+        $f->label = 'Content Samples';
+        $f->notes = '→ `samples/` per template';
         $f->checked = $data['export_samples'] ? 'checked' : '';
+        $f->columnWidth = 50;
         $fieldset->add($f);
 
+        // Samples count — 50%
         $f = $modules->get('InputfieldInteger');
         $f->name = 'samples_count';
         $f->label = 'Samples Per Template';
-        $f->description = 'Number of sample pages to export per template';
         $f->value = $data['samples_count'];
         $f->min = 1;
-        $f->max = 10;
+        $f->max = 20;
         $f->showIf = 'export_samples=1';
+        $f->columnWidth = 50;
         $fieldset->add($f);
 
         $inputfields->add($fieldset);
 
-        // API Documentation
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'API Documentation';
-        $fieldset->collapsed = Inputfield::collapsedNo;
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_api_docs';
-        $f->label = 'Generate API Documentation';
-        $f->description = 'Create JSON schemas and endpoint documentation';
-        $f->notes = 'Creates: **api/** folder with JSON schemas';
-        $f->checked = $data['export_api_docs'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-        // Additional Features
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Additional Features';
-        $fieldset->collapsed = Inputfield::collapsedNo;
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_field_definitions';
-        $f->label = 'Export Detailed Field Definitions';
-        $f->description = 'Include in-depth information about custom fields (Table, Repeater, etc.)';
-        $f->notes = 'Creates: **metadata/field-definitions.json**';
-        $f->checked = $data['export_field_definitions'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_routes';
-        $f->label = 'Export URL Routes';
-        $f->description = 'Create URL routing structure map';
-        $f->notes = 'Creates: **metadata/routes.json**';
-        $f->checked = $data['export_routes'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_performance';
-        $f->label = 'Export Performance Metrics';
-        $f->description = 'Include page counts, database size, and system limits';
-        $f->notes = 'Creates: **metadata/performance.json**';
-        $f->checked = $data['export_performance'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_snippets';
-        $f->label = 'Create Code Snippets';
-        $f->description = 'Generate PHP code examples and patterns';
-        $f->notes = 'Creates: **snippets/** folder with .php files';
-        $f->checked = $data['export_snippets'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_prompts';
-        $f->label = 'Create AI Prompts';
-        $f->description = 'Generate ready-to-use AI prompts for common tasks';
-        $f->notes = 'Creates: **prompts/** folder with project-context.md';
-        $f->checked = $data['export_prompts'] ? 'checked' : '';
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-        // Advanced Settings
+        // ── Advanced Settings (collapsed) ─────────────────────────────────────
         $fieldset = $modules->get('InputfieldFieldset');
         $fieldset->label = 'Advanced Settings';
         $fieldset->collapsed = Inputfield::collapsedYes;
+        $fieldset->icon = 'cog';
 
         $f = $modules->get('InputfieldInteger');
         $f->name = 'max_depth';
-        $f->label = 'Maximum Tree Depth';
-        $f->description = 'Maximum depth for page tree export';
+        $f->label = 'Max Tree Depth';
         $f->value = $data['max_depth'];
         $f->min = 3;
         $f->max = 20;
+        $f->columnWidth = 33;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldInteger');
         $f->name = 'json_child_limit';
         $f->label = 'JSON Children Limit';
-        $f->description = 'Maximum children per page in structure.json to reduce file size';
-        $f->notes = 'Lists with more items will be collapsed or show first N items. Does not affect structure.txt';
+        $f->notes = 'Max children per page in structure.json';
         $f->value = $data['json_child_limit'];
         $f->min = 5;
         $f->max = 100;
+        $f->columnWidth = 33;
+        $fieldset->add($f);
+
+        // spacer
+        $f = $modules->get('InputfieldMarkup');
+        $f->value = '';
+        $f->columnWidth = 34;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'compact_mode';
         $f->label = 'Compact Mode';
-        $f->description = 'Collapse large homogeneous lists in structure.txt for better readability';
-        $f->notes = 'When disabled: shows up to 50 items. When enabled: shows up to 30 items. Lists exceeding the limit will show as "include N elements [template: name]"';
+        $f->notes = 'Collapse large lists in structure.txt';
         $f->checked = $data['compact_mode'] ? 'checked' : '';
+        $f->columnWidth = 33;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'auto_update';
         $f->label = 'Auto-Update on Changes';
-        $f->description = 'Automatically update templates.json when templates/fields are modified';
-        $f->notes = 'Warning: May impact performance on large sites';
+        $f->notes = 'Re-export on template/field save (may impact performance)';
         $f->checked = $data['auto_update'] ? 'checked' : '';
+        $f->columnWidth = 33;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldCheckbox');
         $f->name = 'export_integrations';
-        $f->label = 'Create IDE Integration Files';
-        $f->description = 'Generate configuration files for Cursor, Claude Code, and other AI IDEs';
-        $f->notes = 'Creates: **.cursorrules** and **.claudecode.json** in project root';
+        $f->label = 'IDE Integration Files';
+        $f->notes = 'Creates `.cursorrules` and `.claudecode.json` in root';
         $f->checked = $data['export_integrations'] ? 'checked' : '';
+        $f->columnWidth = 34;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldTextarea');
         $f->name = 'custom_ai_instructions';
         $f->label = 'Custom AI Instructions';
-        $f->description = 'Additional instructions to append to project-context.md';
-        $f->notes = 'Appends to: **prompts/project-context.md** | Example: "Always use BEM methodology"';
+        $f->notes = 'Appended to `prompts/project-context.md`';
         $f->value = $data['custom_ai_instructions'];
         $f->rows = 3;
+        $f->columnWidth = 100;
         $fieldset->add($f);
 
         $inputfields->add($fieldset);

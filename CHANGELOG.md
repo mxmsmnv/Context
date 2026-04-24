@@ -5,6 +5,52 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-04-23
+
+### Added
+
+- **Download Archive button** — new button on the main dashboard (visible only when an export exists) that packages the entire context folder into a ZIP file named `context-{hostname}-{YYYYMMDD-HHmmss}.zip` and streams it directly to the browser. Implemented via `executeDownload()` at `/setup/context/download/`.
+
+### Changed
+
+- **Module settings page redesigned for compactness** — replaced the previous layout of one-fieldset-per-option with a two-column grid (50/50) inside a single "Export Options" fieldset, and moved the two numeric settings (Max Tree Depth, JSON Children Limit) into a three-column row inside Advanced Settings. The page is roughly three times shorter while exposing the same options.
+
+- **Accent metric cards always visible** — previously the three right-hand cards (Exported Files, Export Size, Last Export) only appeared after a successful export, showing a single grey "Not Exported" card otherwise. They are now always rendered; before the first export they display `—` and "Not exported" instead of zeros.
+
+- **Metric card text colour fixed** — `uk-card-primary` combined with UIkit/AdminThemeUikit CSS variables caused child element colours (`uk-text-meta`, `uk-h2`) to remain dark on the red background. Replaced UIkit colour classes on card children with explicit inline styles, and the card background with `style='background:var(--pw-main-color)'` directly, bypassing the cascade entirely.
+
+- **Removed duplicate `<h1>Context</h1>`** — the page title was rendered twice (once by ProcessWire's breadcrumb/title system, once explicitly in `execute()`). The redundant `<h1>` has been removed.
+
+## [1.4.2] - 2026-04-23
+
+### Changed
+
+- **ProFields: proper API-based support for FieldtypeTable, FieldtypeCombo, FieldtypeRepeaterMatrix**
+
+  All three ProFields modules are now accessed exclusively through their official public APIs rather than raw `->data[]` array inspection, which was fragile and frequently produced empty or incorrect output.
+
+  **FieldtypeTable** — replaced ad-hoc `$field->data['col1name']` loops with `$field->type->getColumnsByName($field)`. Column options (already parsed arrays after `getColumn()`) and selectors are handled correctly.
+
+  **FieldtypeCombo** — replaced ad-hoc `$field->data['i1_name']` loops with `$field->getComboSettings()->getSubfields()`. Subfield properties (label, type, required, columnWidth, description, notes, options) are now fully exported.
+
+  **FieldtypeRepeaterMatrix** — replaced broken template-name-pattern matching with `$field->getMatrixTypesInfo()`. This returns each matrix type's label, head, sort order, and its `fields` array (Field objects in template context) directly — no template scanning required. Nested RepeaterMatrix (matrix inside matrix) works correctly via the same code path through `buildFieldData()`.
+
+  **`exportMatrixTemplates()`** — completely rewritten. The old version attempted to find matrix type templates by name patterns (`repeater_matrix_FIELDNAME_*`), which does not correspond to how RepeaterMatrix stores its types internally. The new version iterates all RepeaterMatrix fields and calls `getMatrixTypesData()` for each, producing accurate `matrix-templates.json/.toon`.
+
+  **New helper methods** added to centralise ProFields logic (DRY):
+  - `getTableColumns(Field)` — returns column array via `getColumnsByName()`
+  - `getComboSubfields(Field)` — returns subfield array via `getComboSettings()->getSubfields()`
+  - `getMatrixTypesData(Field)` — returns types array via `getMatrixTypesInfo()`
+  - `buildFieldData(Field)` — builds a full, consistent field descriptor used by `getMatrixTypesData()` for matrix type fields (handles Page, Options, Image/File, Text, Table, Combo, Repeater, nested Matrix)
+
+  All seven call sites across `exportTemplates()`, `exportTree()`, `exportMatrixTemplates()`, `exportFieldDefinitions()` (JSON Schema + field-definitions.json), and `exportSamples()` now use these helpers.
+
+## [1.4.1] - 2026-04-23
+
+### Added
+
+- **Download Archive button** — new button on the main dashboard that packages the entire exported context folder into a ZIP file and streams it to the browser for download. The archive is named `context-{hostname}-{datetime}.zip` and includes all exported files in their original folder structure. Button is only shown when a context export already exists.
+
 ## [1.4.0] - 2026-04-18
 
 ### Changed
