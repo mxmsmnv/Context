@@ -5,6 +5,23 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-04-27
+
+### Added
+
+- **AI Gateway** — new `ContextAI` class providing a centralized AI provider interface for the module and third-party modules. Access via `wire('context')->ai()`.
+- **OpenRouter support** — connect to any model available on OpenRouter (anthropic/*, openai/*, google/*, mistralai/*, etc.) using a single API key.
+- **OpenAI and custom endpoint support** — switch provider to OpenAI or any OpenAI-compatible API endpoint in module settings.
+- **`ai()->complete($prompt)`** — simple one-call text completion returning a plain string.
+- **`ai()->chat($options)`** — full chat completion with messages array, model override, temperature, max tokens.
+- **`ai()->gateway($options)`** — entry point for third-party ProcessWire modules to use the shared AI connection.
+- **`ai()->summarizePage($page)`** — built-in utility to summarize any ProcessWire page via AI.
+- **`ai()->askAboutSite($question, $contextData)`** — ask questions about the site using exported context files.
+- **Global system prompt** — set a system prompt in module settings that is prepended to every AI request from any module.
+- **OpenRouter attribution headers** — `HTTP-Referer` and `X-Title` sent automatically for proper usage tracking.
+- **AI Gateway fieldset in module settings** — provider, API key, default model, max tokens, temperature, timeout, global system prompt, and OpenRouter attribution fields. All fields use `showIf` for a clean UI.
+- **Default model**: `anthropic/claude-sonnet-4-6`.
+
 ## [1.4.3] - 2026-04-23
 
 ### Added

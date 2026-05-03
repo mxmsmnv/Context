@@ -18,7 +18,7 @@ class Context extends Process implements Module, ConfigurableModule {
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.4.3', 
+            'version' => '1.5.0', 
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
@@ -54,16 +54,58 @@ class Context extends Process implements Module, ConfigurableModule {
         'custom_ai_instructions' => '',
         'export_path' => 'site/assets/cache/context/',
         'css_framework' => 'auto',
-        'generate_skill_md' => 1
+        'generate_skill_md' => 1,
+        // AI Gateway
+        'ai_enabled'         => 0,
+        'ai_provider'        => 'openrouter',
+        'ai_api_key'         => '',
+        'ai_model'           => 'anthropic/claude-sonnet-4-6',
+        'ai_max_tokens'      => 1024,
+        'ai_temperature'     => 0.7,
+        'ai_timeout'         => 30,
+        'ai_system_prompt'   => '',
+        'ai_site_url'        => '',
+        'ai_site_name'       => '',
+        'ai_custom_endpoint' => ''
     ];
 
     /**
      * Constructor - apply default values
      */
     public function __construct() {
+        require_once __DIR__ . '/ContextAI.php';
         foreach(self::$configDefaults as $key => $value) {
             $this->$key = $value;
         }
+    }
+
+    /** @var ContextAI|null */
+    protected $_ai = null;
+
+    /**
+     * Get the AI gateway instance.
+     *
+     * Usage from any module:
+     *   $ai = wire('context')->ai();
+     *   $text = $ai->complete('Summarize the homepage');
+     *   $result = $ai->gateway(['caller' => 'MyModule', 'messages' => [...]]);
+     *
+     * @return ContextAI
+     */
+    public function ai(): ContextAI {
+        if($this->_ai === null) {
+            $cfg = [];
+            foreach([
+                'ai_enabled', 'ai_provider', 'ai_api_key', 'ai_model',
+                'ai_max_tokens', 'ai_temperature', 'ai_timeout',
+                'ai_system_prompt', 'ai_site_url', 'ai_site_name',
+                'ai_custom_endpoint',
+            ] as $key) {
+                $cfg[$key] = $this->$key;
+            }
+            $this->_ai = new ContextAI($cfg);
+        }
+        return $this->_ai;
     }
 
     /**
@@ -129,6 +171,47 @@ class Context extends Process implements Module, ConfigurableModule {
     /**
      * CLI Export command
      */
+
+    /**
+     * AJAX endpoint: test AI gateway connection
+     * Called at /setup/context/ai-test/
+     */
+    public function executeAiTest() {
+        header('Content-Type: application/json');
+        
+        if(!$this->config->ajax) {
+            echo json_encode(['success' => false, 'error' => 'AJAX only']);
+            exit;
+        }
+
+        $ai = $this->ai();
+        
+        if(!$ai->isEnabled()) {
+            echo json_encode(['success' => false, 'error' => 'AI Gateway is not enabled or API key is missing']);
+            exit;
+        }
+
+        $start = microtime(true);
+        $result = $ai->chat([
+            'messages'   => [['role' => 'user', 'content' => 'Reply with only the word: OK']],
+            'max_tokens' => 10,
+            'caller'     => 'Context::testConnection',
+        ]);
+        $ms = round((microtime(true) - $start) * 1000);
+
+        if(isset($result['error'])) {
+            echo json_encode(['success' => false, 'error' => $result['error']]);
+        } else {
+            echo json_encode([
+                'success' => true,
+                'model'   => $result['model'] ?? 'unknown',
+                'ms'      => $ms,
+                'content' => trim($result['content'] ?? ''),
+            ]);
+        }
+        exit;
+    }
+
     protected function cliExport($argv) {
         echo "🚀 Starting Context export...\n\n";
         
@@ -4763,6 +4846,157 @@ SKILL;
         $f->value = $data['custom_ai_instructions'];
         $f->rows = 3;
         $f->columnWidth = 100;
+        $fieldset->add($f);
+
+        $inputfields->add($fieldset);
+
+
+        // ── AI Gateway ──────────────────────────────────────────────────────
+        $fieldset = $modules->get('InputfieldFieldset');
+        $fieldset->label = 'AI Gateway';
+        $fieldset->description = "Centralized AI access for this module and third-party modules via <code>wire('context')->ai()</code>.";
+        $fieldset->collapsed = Inputfield::collapsedNo;
+        $fieldset->icon = 'magic';
+
+        $f = $modules->get('InputfieldCheckbox');
+        $f->name = 'ai_enabled';
+        $f->label = 'Enable AI Gateway';
+        $f->notes = 'Required to use any AI features';
+        $f->checked = $data['ai_enabled'] ? 'checked' : '';
+        $f->columnWidth = 33;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldSelect');
+        $f->name = 'ai_provider';
+        $f->label = 'Provider';
+        $f->addOption('openrouter', 'OpenRouter');
+        $f->addOption('openai', 'OpenAI');
+        $f->addOption('custom', 'Custom (OpenAI-compatible)');
+        $f->value = $data['ai_provider'];
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 33;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_custom_endpoint';
+        $f->label = 'Custom API Base URL';
+        $f->notes = 'e.g. https://my-llm.example.com/v1';
+        $f->placeholder = 'https://';
+        $f->value = $data['ai_custom_endpoint'];
+        $f->showIf = 'ai_provider=custom, ai_enabled=1';
+        $f->columnWidth = 34;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_api_key';
+        $f->label = 'API Key';
+        $f->notes = 'For OpenRouter: get your key at openrouter.ai/keys';
+        $f->placeholder = 'sk-or-...';
+        $f->value = $data['ai_api_key'];
+        $f->attr('type', 'password');
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 100;
+        $fieldset->add($f);
+
+
+        // Test connection button
+        $adminUrl = wire('config')->urls->admin;
+        $f = $modules->get('InputfieldMarkup');
+        $f->name = 'ai_test_connection';
+        $f->label = 'Connection Status';
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 100;
+        $html = '<div id="ai-gateway-status" style="display:flex;align-items:center;gap:12px;padding:8px 0;">';
+        $html .= '<button type="button" id="ai-test-btn" class="ui-button ui-widget ui-state-default ui-corner-all" style="cursor:pointer;">Test Connection</button>';
+        $html .= '<span id="ai-test-result" style="font-size:13px;"></span>';
+        $html .= '</div>';
+        $html .= '<script>';
+        $html .= 'document.getElementById("ai-test-btn").addEventListener("click", function() {';
+        $html .= '  var btn = this;';
+        $html .= '  var result = document.getElementById("ai-test-result");';
+        $html .= '  btn.disabled = true;';
+        $html .= '  result.innerHTML = "<em>Testing...</em>";';
+        $html .= '  fetch("' . $adminUrl . 'setup/context/ai-test/", {method:"POST",headers:{"X-Requested-With":"XMLHttpRequest"}})';
+        $html .= '  .then(function(r){return r.json();})';
+        $html .= '  .then(function(d){';
+        $html .= '    if(d.success){result.innerHTML="<b style=\"color:#3d9970\">&#10003; Connected &mdash; "+d.model+" &mdash; "+d.ms+"ms</b>";}';
+        $html .= '    else{result.innerHTML="<b style=\"color:#e74c3c\">&#10007; Error: "+d.error+"</b>";}';
+        $html .= '    btn.disabled=false;';
+        $html .= '  }).catch(function(){result.innerHTML="<b style=\"color:#e74c3c\">&#10007; Request failed</b>";btn.disabled=false;});';
+        $html .= '});';
+        $html .= '</script>';
+        $f->value = $html;
+        $fieldset->add($f);
+
+                $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_model';
+        $f->label = 'Default Model';
+        $f->notes = 'OpenRouter format: provider/model  e.g. anthropic/claude-sonnet-4-6 or openai/gpt-4o-mini';
+        $f->placeholder = 'anthropic/claude-sonnet-4-6';
+        $f->value = $data['ai_model'];
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldInteger');
+        $f->name = 'ai_timeout';
+        $f->label = 'Timeout (sec)';
+        $f->value = (int)$data['ai_timeout'];
+        $f->min = 5;
+        $f->max = 120;
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 25;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldInteger');
+        $f->name = 'ai_max_tokens';
+        $f->label = 'Max Tokens';
+        $f->value = (int)$data['ai_max_tokens'];
+        $f->min = 64;
+        $f->max = 16384;
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 25;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_temperature';
+        $f->label = 'Temperature';
+        $f->notes = '0 = deterministic  ·  1 = creative';
+        $f->placeholder = '0.7';
+        $f->value = $data['ai_temperature'];
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldTextarea');
+        $f->name = 'ai_system_prompt';
+        $f->label = 'Global System Prompt';
+        $f->notes = 'Prepended to every AI request from any module using this gateway.';
+        $f->placeholder = 'You are a helpful ProcessWire development assistant.';
+        $f->value = $data['ai_system_prompt'];
+        $f->rows = 3;
+        $f->showIf = 'ai_enabled=1';
+        $f->columnWidth = 100;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_site_url';
+        $f->label = 'Site URL (OpenRouter attribution)';
+        $f->notes = 'Sent as HTTP-Referer header.';
+        $f->value = $data['ai_site_url'];
+        $f->showIf = 'ai_provider=openrouter, ai_enabled=1';
+        $f->columnWidth = 50;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldText');
+        $f->name = 'ai_site_name';
+        $f->label = 'Site / App Name (OpenRouter attribution)';
+        $f->notes = 'Sent as X-Title header.';
+        $f->value = $data['ai_site_name'];
+        $f->showIf = 'ai_provider=openrouter, ai_enabled=1';
+        $f->columnWidth = 50;
         $fieldset->add($f);
 
         $inputfields->add($fieldset);

@@ -60,6 +60,15 @@ Code snippets are automatically customized for your site type:
 - Write permissions for `/site/assets/context/` directory
 - No external dependencies required - pure PHP implementation
 
+
+### AI Gateway
+
+- **OpenRouter integration** — connect to Claude, GPT-4, Gemini, Mistral and 200+ models via one API key
+- **Shared gateway** — any ProcessWire module can use the AI connection via `wire('context')->ai()`
+- **Simple API** — `$ai->complete($prompt)` for quick calls, `$ai->chat($options)` for full control
+- **Global system prompt** — set once in module settings, applied to all AI requests
+- **OpenAI-compatible** — works with OpenAI directly or any compatible self-hosted endpoint
+
 ## Installation
 
 ### Method 1: Manual Installation

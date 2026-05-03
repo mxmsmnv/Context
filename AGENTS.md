@@ -260,6 +260,63 @@ Save the file.
 
 The file has embedded rules and a boundary line (`DO NOT UPDATE ABOVE THIS LINE`) to protect the template structure.
 
+## AI Gateway
+
+Third-party modules and scripts can use the centralized AI connection configured in module settings.
+
+### Usage
+
+```php
+// Get the AI gateway
+$ai = wire('context')->ai();
+
+// Check if AI is configured
+if($ai->isEnabled()) {
+    // Simple text completion
+    $summary = $ai->complete('Summarize this site in one paragraph.');
+
+    // Full options
+    $result = $ai->chat([
+        'messages'    => [['role' => 'user', 'content' => 'List all templates']],
+        'model'       => 'openai/gpt-4o-mini',   // override default model
+        'max_tokens'  => 512,
+        'caller'      => 'MyModule',
+    ]);
+
+    if(isset($result['error'])) {
+        // handle error
+    } else {
+        echo $result['content'];
+        echo "Tokens used: " . $result['usage']['total_tokens'];
+    }
+
+    // Gateway method (preferred for third-party modules)
+    $result = $ai->gateway([
+        'caller'   => 'MyModule',
+        'messages' => [['role' => 'user', 'content' => '...']],
+    ]);
+
+    // Summarize a page
+    $text = $ai->summarizePage($pages->get('/about/'));
+
+    // Ask about the site using exported context
+    $toon = file_get_contents($context->getContextPath() . 'structure.toon');
+    $answer = $ai->askAboutSite('How many product templates are there?', $toon);
+}
+```
+
+### Supported Providers
+
+| Provider | Setting value | Notes |
+|----------|---------------|-------|
+| OpenRouter | `openrouter` | 200+ models, single API key at openrouter.ai/keys |
+| OpenAI | `openai` | Direct OpenAI API |
+| Custom | `custom` | Any OpenAI-compatible endpoint |
+
+### Default Model
+
+`anthropic/claude-sonnet-4-6` (configurable in module settings)
+
 ## Troubleshooting
 
 ### "command not found: php"
@@ -295,5 +352,5 @@ Make sure you're running from ProcessWire root directory (where index.php is loc
 
 ---
 
-**Generated for**: Context Module v1.3.0  
+**Generated for**: Context Module v1.5.0  
 **Compatible with**: Claude Code, Cursor, Windsurf, Copilot, and other AI coding agents
