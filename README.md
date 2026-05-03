@@ -32,7 +32,7 @@ Context automatically generates comprehensive documentation of your ProcessWire 
 - **Configuration** - ProcessWire version, PHP settings, installed modules
 - **Custom Classes** - Automatic detection of custom Page classes from `/site/classes/`
 - **Frontend Stack** - Auto-detects Alpine.js, Tailwind CSS, UIkit, and other frameworks
-- **ProFields Support** - Special handling for Repeater Matrix field types (if installed)
+- **ProFields Support** - Full support for Table, Combo, and Repeater Matrix field types via official APIs (if installed)
 
 ### Optional Features
 
@@ -59,6 +59,15 @@ Code snippets are automatically customized for your site type:
 - PHP 8.2 or higher
 - Write permissions for `/site/assets/context/` directory
 - No external dependencies required - pure PHP implementation
+
+
+### AI Gateway
+
+- **OpenRouter integration** — connect to Claude, GPT-4, Gemini, Mistral and 200+ models via one API key
+- **Shared gateway** — any ProcessWire module can use the AI connection via `wire('context')->ai()`
+- **Simple API** — `$ai->complete($prompt)` for quick calls, `$ai->chat($options)` for full control
+- **Global system prompt** — set once in module settings, applied to all AI requests
+- **OpenAI-compatible** — works with OpenAI directly or any compatible self-hosted endpoint
 
 ## Installation
 
@@ -96,7 +105,7 @@ Then refresh modules in admin and install.
 
 ### 2. Export Your Site
 
-Click **"Re-Export Context for AI"** or visit:
+Click **"Re-Export Context for AI"** (or **"Download Archive"** to save a ZIP of all exported files) or visit:
 ```
 /processwire/module/?name=Context
 ```
@@ -142,7 +151,7 @@ existing patterns in templates.toon.
 ├── templates.json                 # Templates (JSON)
 ├── templates.toon                 # Templates (TOON - AI optimized!)
 ├── templates.csv                  # Templates in CSV
-├── matrix-templates.json          # Repeater Matrix types (ProFields) - if installed
+├── matrix-templates.json          # Repeater Matrix types (ProFields: Table/Combo/Matrix) - if installed
 ├── matrix-templates.toon          # Repeater Matrix types (TOON) - if installed
 ├── config.json                    # Configuration (JSON)
 ├── config.toon                    # Configuration (TOON)
@@ -297,6 +306,45 @@ If you use 100 prompts/month: Save ~$13/month
 If you use 1000 prompts/month: Save ~$130/month
 ```
 
+## CLI Commands for AI Agents
+
+The module exposes a full command-line interface so AI coding agents (Claude Code, Cursor, Windsurf, Cline, etc.) can interact with ProcessWire directly from the terminal.
+
+### Export & Query
+
+```bash
+php index.php --context-export              # Full export (JSON + TOON)
+php index.php --context-export --toon-only  # TOON format only
+php index.php --context-export --json-only  # JSON format only
+
+php index.php --context-query templates     # List all templates
+php index.php --context-query fields        # List all fields
+php index.php --context-query pages         # List pages (optional selector)
+php index.php --context-stats               # Quick site statistics
+php index.php --context-help                # CLI documentation
+```
+
+### Full ProcessWire API Access
+
+```bash
+# Single-line: count pages, read fields, anything
+php index.php --context-eval 'echo $pages->count() . " pages\n";'
+
+# Multi-line: create or modify pages, templates, fields
+echo '
+$p = new Page();
+$p->template = "basic-page";
+$p->parent = $pages->get("/");
+$p->title = "New Page";
+$p->save();
+echo "Created: " . $p->url . "\n";
+' | php index.php --context-stdin
+```
+
+**Available API variables:** `$pages`, `$templates`, `$fields`, `$modules`, `$config`, `$users`, `$session`, `$input`, `$sanitizer`, `$database`, `$cache`, `$log`, `$files`, `$context`
+
+> **Security:** These commands execute with full ProcessWire privileges. Use only in development environments or with appropriate security measures.
+
 ## Auto-Update Feature
 
 Enable **Auto-Update on Changes** to automatically regenerate context when you:
@@ -380,6 +428,11 @@ Choose your site type to get customized code snippets:
 - **Auto-Update on Changes** - Auto-export on template/field save
 - **Create IDE Integration Files** - `.cursorrules`, `.claudecode.json`
 - **Custom AI Instructions** - Project-specific AI instructions
+
+### Dashboard Actions
+
+- **Re-Export Context for AI** - Regenerate all export files
+- **Download Archive** - Download entire context folder as a ZIP file (`context-{hostname}-{datetime}.zip`). Button appears after the first export.
 
 ## Technical Details
 
