@@ -5,6 +5,93 @@ All notable changes to the Context module will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-05-30
+
+### Changed
+
+- Module metadata now reports `2.0.0`, and generated docs use the module version constant instead of stale hardcoded versions.
+- Hardened admin actions: export, archive download, and AI connection test now require POST + CSRF validation.
+- Replaced broad `page-edit` access with explicit runtime checks for superuser or the dedicated `context-admin` permission.
+- Module metadata no longer blocks CLI loading with an admin permission check when no ProcessWire user is available.
+- CLI export now uses the same existing exporter methods as the admin flow instead of calling stale method names.
+- CLI eval/stdin execution now shares one internal runner and the help text shows the full stdin command.
+- CLI command dispatch now runs from both `init()` and `ready()` with a guard, improving compatibility with ProcessWire CLI bootstrap differences.
+- Context now explicitly reports itself as autoload because Process modules default to non-autoload, restoring documented `php index.php --context-*` CLI behavior.
+- Admin and CLI exports now share one internal export pipeline to prevent future behavior drift.
+- TOON serialization moved into a dedicated `ContextToon` class.
+- TOON serialization now handles scalar root values and unserializable nested table values defensively.
+- `--context-export --toon-only` now removes generated JSON/CSV artifacts from the export folder after a successful TOON export.
+- `--context-export --json-only` now removes stale TOON artifacts from previous exports.
+- Admin exports now also remove stale TOON artifacts when TOON export is disabled.
+- Generated README/SKILL resources now reflect TOON-only exports instead of listing JSON/CSV files that are removed after export.
+- Generated README workflows now reference the active context files for TOON/JSON modes.
+- Generated README directory trees no longer duplicate core entries or list JSON-only API/metadata artifacts in TOON-only mode.
+- TOON-only cleanup now removes empty JSON-only `api/` and `metadata/` directories after pruning.
+- TOON-only generated docs no longer reference JSON-only `api/` or `metadata/` resources.
+- TOON-only README/SKILL file descriptions now use `.toon` resource names instead of stale JSON filenames.
+- Disabled optional export sections now clean up their known generated artifacts; `prompts/project-summary.md` is preserved.
+- IDE integration files now reference the active template context format and skip prompt paths when prompt export is disabled.
+- IDE integration updates now refuse to write through symlinked `.cursorrules` or `.claudecode.json` files.
+- Generated prompt templates now reference the active context format instead of hardcoding JSON files.
+- Auto-update now removes stale TOON artifacts when TOON export is disabled.
+- Content sample export now skips fields matching a configurable sensitive-field denylist.
+- Content sample field serialization is now centralized for normal pages, repeaters, and matrix items.
+- Content sample serialization moved into a dedicated `ContextSampleSerializer` class.
+- Content sample serialization now handles non-iterable repeater values and Table/Combo JSON conversion failures defensively.
+- Export path creation now rejects unsafe targets such as the site root, assets root, cache root, templates folder, and module folder.
+- Export path validation now rejects symlinked export directories and also checks resolved real paths.
+- Export file writes now go through checked writer helpers with `LOCK_EX` and JSON error reporting.
+- Local file reads now go through shared helpers that skip symlinks, avoid warnings on unreadable files, and support bounded reads for framework scanners.
+- Export-folder size/count/prune operations now skip symlinks and handle unreadable directories defensively.
+- API docs no longer create an unused `api/examples/` directory and now infer richer JSON Schema types for nested fields.
+- API schema generation now uses the shared field-property helper for top-level fields, including proper `FieldtypeFile` item definitions.
+- Admin dashboard now escapes dynamic path, URL, and table values before rendering HTML.
+- Admin dashboard export preview now reflects JSON/TOON mode without brittle positional insertions.
+- Admin dashboard export preview now hides JSON-only API/metadata rows in TOON-only mode.
+- Admin dashboard now shows the current export inventory, output format, health badges, and ready-to-run CLI commands.
+- Admin dashboard now uses a 2.0 cockpit layout with a prominent export status header, action cluster, and modern metric panels.
+- Admin dashboard styling now follows the ProcessWire Konkat design-system approach with UIkit card classes, scoped CSS, and dark/auto theme-aware tokens.
+- Admin dashboard now presents configuration, export preview, and quick tips as modern dark-theme-aware cards instead of legacy dense tables.
+- CLI command panel now includes a short usage guide for where to run commands and which generated files to read first.
+- Admin dashboard hero now uses a flat ProcessWire primary color and the export/CLI panels align to equal height.
+- Module settings now expose explicit export format selection for TOON, JSON, and CSV; final export cleanup follows the selected formats.
+- Admin dashboard rendering moved into a dedicated `ContextDashboard` class as part of the 2.0 module decomposition.
+- Internal support classes moved into `src/` to keep the module root focused on the ProcessWire entrypoint and docs.
+- Shared export orchestration moved into `src/ContextExporter.php`.
+- CLI command handling moved into `src/ContextCli.php`.
+- Auto-update handling moved into `src/ContextAutoUpdater.php` and now uses the shared export pipeline.
+- Export filesystem/path validation helpers moved into `src/ContextFilesystem.php`.
+- Page structure and combined template tree builders moved into `src/ContextStructureExporter.php`.
+- Template, field, CSV, and ProFields export helpers moved into `src/ContextTemplateExporter.php`.
+- Page and RepeaterMatrix sample export moved into `src/ContextSampleExporter.php`.
+- API endpoint and JSON Schema export moved into `src/ContextApiExporter.php`.
+- Metadata export for field definitions, routes, and performance moved into `src/ContextMetadataExporter.php`.
+- Snippet and prompt file writing moved into `src/ContextPromptExporter.php`.
+- Prompt template generation moved into `src/ContextPromptTemplates.php`.
+- IDE integration file updates moved into `src/ContextIntegrationExporter.php`.
+- Site configuration, module inventory, and custom class export moved into `src/ContextSystemExporter.php`.
+- Generated README/SKILL documentation moved into `src/ContextDocsExporter.php`.
+- Context ZIP download handling moved into `src/ContextArchiveDownloader.php`.
+- Context admin export POST handling moved into `src/ContextAdminActions.php`.
+- AI gateway connection-test action moved into `src/ContextAiTestAction.php`.
+- Export format normalization and state application moved into `src/ContextExportFormats.php`.
+- Frontend stack detection moved into `src/ContextFrontendDetector.php`.
+- Route map metadata detection moved into `src/ContextMetadataExporter.php`.
+- Dashboard/prompt site stats and access-map inspection moved into `src/ContextSiteInspector.php`.
+- Sensitive sample-field filtering moved into `src/ContextSampleSerializer.php`.
+- Shared admin web helpers moved into `src/ContextWebHelper.php`.
+- Removed unused legacy helper methods left behind by earlier export refactors.
+- Removed the legacy non-executed dashboard HTML branch from `execute()`.
+- Refreshed generated snippet templates with safer selector sanitization, sturdier image helpers, and API examples that return arrays instead of raw PageArray objects.
+- Module configuration form rendering moved into `src/ContextConfigFields.php`.
+- AI Gateway connection-test UI now renders provider responses as text instead of injecting HTML.
+- AI Gateway connection-test responses now use a shared JSON response helper with encoding failure handling.
+- Archive downloads now validate the export path, clean up failed temporary files, and skip symlinks.
+- AI Gateway no longer returns raw provider error bodies and normalizes OpenRouter referer URLs more safely.
+- AI Gateway now validates chat messages, clamps request options, and keeps per-call timeout overrides from mutating module configuration.
+- AI Gateway now treats custom providers without a base URL as not configured instead of posting to a relative endpoint.
+- AI Gateway now reports invalid provider JSON responses and handles OpenRouter model-list fetch failures defensively.
+
 ## [1.5.0] - 2026-04-27
 
 ### Added

@@ -57,7 +57,7 @@ Code snippets are automatically customized for your site type:
 
 - ProcessWire 3.0 or higher
 - PHP 8.2 or higher
-- Write permissions for `/site/assets/context/` directory
+- Write permissions for `/site/assets/cache/context/` directory, or for your configured export path
 - No external dependencies required - pure PHP implementation
 
 
@@ -110,7 +110,7 @@ Click **"Re-Export Context for AI"** or visit:
 /processwire/module/?name=Context
 ```
 
-Files are generated in: `/site/assets/context/`
+Files are generated in: `/site/assets/cache/context/` by default.
 
 ### 3. Use with AI
 
@@ -140,7 +140,7 @@ existing patterns in templates.toon.
 ### Directory Structure
 
 ```
-/site/assets/context/
+/site/assets/cache/context/
 ├── README.md                      # Documentation with format guide
 ├── SKILL.md                       # AI agent skill definition (for Cline, Junie, etc.)
 ├── tree.json                      # Complete site structure (templates + fields + pages)
@@ -259,7 +259,7 @@ Result: Same quality response, but using 40% fewer tokens!
 
 ### 2. Onboarding New Developers
 
-Share the `/site/assets/context/` folder with new team members. They get:
+Share the exported context folder with new team members. By default this is `/site/assets/cache/context/`. They get:
 - Complete site structure overview (both formats)
 - All templates and field definitions
 - Code examples and patterns
@@ -396,7 +396,7 @@ Choose your site type to get customized code snippets:
 
 - ProcessWire 3.x
 - PHP 8.1 or higher
-- Write permissions for `/site/assets/context/`
+- Write permissions for `/site/assets/cache/context/`, or for your configured export path
 
 ### Performance
 
@@ -415,7 +415,7 @@ Choose your site type to get customized code snippets:
   3. Absolute paths outside web root (works on both Apache and Nginx)
 - **Configurable export path** - Set custom location in module settings
 - **No sensitive data exported** - No passwords, API keys, or credentials
-- **Superuser access only** - Module accessible only to logged-in superusers
+- **Restricted admin access** - Module actions require superuser access or the dedicated `context-admin` permission
 
 **Server-Specific Setup:**
 
@@ -449,12 +449,35 @@ Choose your site type to get customized code snippets:
 - **Exports (default)**: `/site/assets/cache/context/` (ProcessWire protected, Apache only)
 - **Exports (Nginx)**: `/home/user/context-exports/` (absolute path, outside web root - recommended)
 - **Protection**: ProcessWire root .htaccess + local .htaccess (Apache) OR absolute path (Nginx)
-- **Snippets Library**: `/site/modules/Context/ContextSnippets.php`
+- **Snippets Library**: `/site/modules/Context/src/ContextSnippets.php`
+- **TOON Serializer**: `/site/modules/Context/src/ContextToon.php`
+- **Sample Serializer**: `/site/modules/Context/src/ContextSampleSerializer.php`
+- **Sample Exporter**: `/site/modules/Context/src/ContextSampleExporter.php`
+- **API Exporter**: `/site/modules/Context/src/ContextApiExporter.php`
+- **Metadata Exporter**: `/site/modules/Context/src/ContextMetadataExporter.php`
+- **Prompt Exporter**: `/site/modules/Context/src/ContextPromptExporter.php`
+- **Prompt Templates**: `/site/modules/Context/src/ContextPromptTemplates.php`
+- **Integration Exporter**: `/site/modules/Context/src/ContextIntegrationExporter.php`
+- **System Exporter**: `/site/modules/Context/src/ContextSystemExporter.php`
+- **Docs Exporter**: `/site/modules/Context/src/ContextDocsExporter.php`
+- **Archive Downloader**: `/site/modules/Context/src/ContextArchiveDownloader.php`
+- **Admin Actions**: `/site/modules/Context/src/ContextAdminActions.php`
+- **AI Test Action**: `/site/modules/Context/src/ContextAiTestAction.php`
+- **Export Format Helper**: `/site/modules/Context/src/ContextExportFormats.php`
+- **Frontend Detector**: `/site/modules/Context/src/ContextFrontendDetector.php`
+- **Site Inspector**: `/site/modules/Context/src/ContextSiteInspector.php`
+- **Web Helper**: `/site/modules/Context/src/ContextWebHelper.php`
+- **CLI Runner**: `/site/modules/Context/src/ContextCli.php`
+- **Auto Updater**: `/site/modules/Context/src/ContextAutoUpdater.php`
+- **Filesystem Helper**: `/site/modules/Context/src/ContextFilesystem.php`
+- **Structure Exporter**: `/site/modules/Context/src/ContextStructureExporter.php`
+- **Template Exporter**: `/site/modules/Context/src/ContextTemplateExporter.php`
 - **Custom paths**: Configure in Setup → Modules → Context → Export Path
   - `site/assets/cache/context/` - default, ProcessWire protected (Apache)
   - `/home/user/context-exports/` - absolute path outside web root (Apache + Nginx)
   - `.junie/skills/docs` - for Junie AI integration
   - `../../context-exports/` - relative path (two levels up)
+  - Unsafe targets such as the site root, assets root, cache root, templates folder, and module folder are blocked.
 
 ## Format Comparison in Module Admin
 

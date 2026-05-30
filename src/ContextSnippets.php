@@ -6,7 +6,7 @@
  * This file contains all code snippet templates for different site types.
  * Edit this file to customize or add new snippet patterns.
  * 
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 class ContextSnippets {
@@ -36,19 +36,22 @@ class ContextSnippets {
 
 // ==================== BASIC QUERIES ====================
 
-// Get all published pages
-$items = $pages->find("template=' . $t1 . ', status!=hidden");
+// Get all public pages for a template
+$items = $pages->find("template=' . $t1 . ', status<unpublished, sort=sort");
 
-// Get single page by name
-$page = $pages->get("template=' . $t1 . ', name=page-name");
+// Get single page by sanitized name
+$name = $sanitizer->pageName("page-name");
+$page = $pages->get("template=' . $t1 . ', name=$name");
 
 // Get multiple templates
-$items = $pages->find("template=' . $t1 . '|' . $t2 . '");
+$items = $pages->find("template=' . $t1 . '|' . $t2 . ', status<unpublished");
 
 // ==================== SEARCH ====================
 
-$query = $sanitizer->text($input->get->q);
-$results = $pages->find("template=' . $t1 . ', title|summary%=$query");
+$query = $sanitizer->selectorValue($input->get->text("q"));
+$results = $query !== ""
+    ? $pages->find("template=' . $t1 . ', title|summary%=$query, limit=20")
+    : new PageArray();
 
 ';
         
@@ -112,7 +115,7 @@ $drafts = $pages->find("template=post, status=unpublished");
 $scheduled = $pages->find("template=post, publish_date>=' . time() . '");
 
 // Search in posts
-$query = $sanitizer->text($input->get->q);
+$query = $sanitizer->selectorValue($input->get->text("q"));
 $results = $pages->find("template=post, title|body|summary~=$query, limit=20");
 
 // Related posts (same category, exclude current)
@@ -165,7 +168,7 @@ $products = $pages->find("template=product, brand=$brand");
 $products = $pages->find("template=product, color=$colorId, size=$sizeId");
 
 // Search products
-$query = $sanitizer->text($input->get->q);
+$query = $sanitizer->selectorValue($input->get->text("q"));
 $results = $pages->find("template=product, title|sku|description~=$query");
 
 // Filter products by rating
@@ -292,7 +295,7 @@ $items = $pages->find("template=' . $t1 . ', vintage=$year");
 $items = $pages->find("template=' . $t1 . ', rating>=4");
 
 // Search across catalog
-$query = $sanitizer->text($input->get->q);
+$query = $sanitizer->selectorValue($input->get->text("q"));
 $results = $pages->find("template=' . $t1 . ', title|description~=$query");
 
 // Get related items
@@ -412,7 +415,7 @@ $ids = [1, 2, 3, 4];
 $items = $pages->find("id=" . implode("|", $ids));
 
 // Full-text search
-$query = $sanitizer->text($input->get->q);
+$query = $sanitizer->selectorValue($input->get->text("q"));
 $results = $pages->find("template=' . $t1 . ', title|body~=$query");
 
 // ==================== COUNTING ====================
@@ -422,6 +425,7 @@ $count = $pages->count("template=' . $t1 . '");
 $activeCount = $pages->count("template=' . $t1 . ', status=1");
 
 // Check if exists
+$name = $sanitizer->pageName($name);
 $exists = $pages->count("template=' . $t1 . ', name=$name") > 0;
 
 // Count from PageArray
@@ -480,9 +484,16 @@ function getPageTitle(Page $page, $default = \'Untitled\') {
  */
 function getFirstImage(Page $page, $fieldName = \'images\', $width = null) {
     $images = $page->get($fieldName);
-    if(!$images || !$images->count()) return null;
-    
-    $image = $images->first();
+    if(!$images) return null;
+
+    if($images instanceof Pageimage) {
+        $image = $images;
+    } elseif($images instanceof Pageimages && $images->count()) {
+        $image = $images->first();
+    } else {
+        return null;
+    }
+
     return $width ? $image->width($width) : $image;
 }
 
@@ -564,7 +575,8 @@ function buildQueryString($params) {
  * Get current URL with query string
  */
 function getCurrentUrl() {
-    return wire(\'page\')->httpUrl . ($_SERVER[\'QUERY_STRING\'] ? \'?\' . $_SERVER[\'QUERY_STRING\'] : \'\');
+    $query = wire(\'sanitizer\')->entities($_SERVER[\'QUERY_STRING\'] ?? \'\');
+    return wire(\'page\')->httpUrl . ($query ? \'?\' . $query : \'\');
 }
 
 /**
@@ -590,6 +602,8 @@ function isCurrentSection(Page $page) {
 function getResponsiveImage(Pageimage $image, $sizes = []) {
     $srcset = [];
     foreach($sizes as $width) {
+        $width = (int) $width;
+        if($width < 1) continue;
         $resized = $image->width($width);
         $srcset[] = "{$resized->url} {$width}w";
     }
@@ -618,6 +632,8 @@ function sanitizeInput($value, $type = \'text\') {
         case \'email\': return $sanitizer->email($value);
         case \'url\': return $sanitizer->url($value);
         case \'int\': return $sanitizer->int($value);
+        case \'selector\': return $sanitizer->selectorValue($value);
+        case \'pageName\': return $sanitizer->pageName($value);
         case \'text\':
         default: return $sanitizer->text($value);
     }
@@ -674,7 +690,7 @@ function groupBy($pageArray, $field) {
 
 // GET /api/' . $t1 . '/
 function listItems() {
-    $items = pages()->find("template=' . $t1 . ', limit=50");
+    $items = pages()->find("template=' . $t1 . ', status<unpublished, sort=-modified, limit=50");
     
     $data = [];
     foreach($items as $item) {
@@ -691,6 +707,7 @@ function listItems() {
 
 // GET /api/' . $t1 . '/{id}
 function getItem($id) {
+    $id = (int) $id;
     $item = pages()->get("template=' . $t1 . ', id=$id");
     
     if(!$item->id) {
@@ -711,11 +728,22 @@ function getItem($id) {
 
 // Search API
 function search() {
-    $query = input()->get->text(\'q\');
-    $results = pages()->find("template=' . $t1 . ', title%=$query, limit=20");
+    $query = sanitizer()->selectorValue(input()->get->text(\'q\'));
+    $results = $query !== ""
+        ? pages()->find("template=' . $t1 . ', status<unpublished, title%=$query, limit=20")
+        : new PageArray();
     
+    $data = [];
+    foreach($results as $item) {
+        $data[] = [
+            \'id\' => $item->id,
+            \'title\' => $item->title,
+            \'url\' => $item->httpUrl
+        ];
+    }
+
     header(\'Content-Type: application/json\');
-    echo json_encode([\'success\' => true, \'data\' => $results]);
+    echo json_encode([\'success\' => true, \'data\' => $data]);
 }
 ';
     }

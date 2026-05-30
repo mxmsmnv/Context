@@ -40,8 +40,8 @@ php index.php --context-stats
 | Command | Description |
 |---------|-------------|
 | `php index.php --context-export` | Full export (JSON + TOON formats) |
-| `php index.php --context-export --toon-only` | Export only TOON format (30-60% fewer tokens) |
-| `php index.php --context-export --json-only` | Export only JSON format |
+| `php index.php --context-export --toon-only` | Export TOON format and remove generated JSON/CSV artifacts (30-60% fewer tokens) |
+| `php index.php --context-export --json-only` | Export JSON format and remove stale TOON artifacts |
 
 ### Query Commands
 
@@ -352,5 +352,5 @@ Make sure you're running from ProcessWire root directory (where index.php is loc
 
 ---
 
-**Generated for**: Context Module v1.5.0  
+**Generated for**: Context Module v2.0.0
 **Compatible with**: Claude Code, Cursor, Windsurf, Copilot, and other AI coding agents

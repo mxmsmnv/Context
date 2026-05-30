@@ -15,14 +15,18 @@
 
 class Context extends Process implements Module, ConfigurableModule {
 
+    const VERSION = '2.0.0';
+
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => '1.5.0', 
+            'version' => 200,
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Alex',
             'icon' => 'code',
-            'permission' => 'page-edit',
+            'permissions' => [
+                'context-admin' => 'Administer Context exports and AI gateway'
+            ],
             'page' => [
                 'name' => 'context',
                 'parent' => 'setup',
@@ -47,11 +51,13 @@ class Context extends Process implements Module, ConfigurableModule {
         'export_field_definitions' => 1,
         'export_performance' => 1,
         'export_integrations' => 0,
+        'export_formats' => 'toon,json,csv',
         'export_toon_format' => 1,
         'compact_mode' => 0,
         'auto_update' => 0,
         'site_type' => 'generic',
         'custom_ai_instructions' => '',
+        'sample_field_denylist' => 'password, pass, email, token, secret, api_key, apikey, auth, session, cookie, csrf, salt, hash, phone, mobile, address, ssn, credit, card, iban, private',
         'export_path' => 'site/assets/cache/context/',
         'css_framework' => 'auto',
         'generate_skill_md' => 1,
@@ -73,7 +79,32 @@ class Context extends Process implements Module, ConfigurableModule {
      * Constructor - apply default values
      */
     public function __construct() {
-        require_once __DIR__ . '/ContextAI.php';
+        require_once __DIR__ . '/src/ContextAI.php';
+        require_once __DIR__ . '/src/ContextToon.php';
+        require_once __DIR__ . '/src/ContextSampleSerializer.php';
+        require_once __DIR__ . '/src/ContextDashboard.php';
+        require_once __DIR__ . '/src/ContextExporter.php';
+        require_once __DIR__ . '/src/ContextConfigFields.php';
+        require_once __DIR__ . '/src/ContextCli.php';
+        require_once __DIR__ . '/src/ContextAutoUpdater.php';
+        require_once __DIR__ . '/src/ContextFilesystem.php';
+        require_once __DIR__ . '/src/ContextStructureExporter.php';
+        require_once __DIR__ . '/src/ContextTemplateExporter.php';
+        require_once __DIR__ . '/src/ContextSampleExporter.php';
+        require_once __DIR__ . '/src/ContextApiExporter.php';
+        require_once __DIR__ . '/src/ContextMetadataExporter.php';
+        require_once __DIR__ . '/src/ContextPromptExporter.php';
+        require_once __DIR__ . '/src/ContextPromptTemplates.php';
+        require_once __DIR__ . '/src/ContextIntegrationExporter.php';
+        require_once __DIR__ . '/src/ContextSystemExporter.php';
+        require_once __DIR__ . '/src/ContextDocsExporter.php';
+        require_once __DIR__ . '/src/ContextArchiveDownloader.php';
+        require_once __DIR__ . '/src/ContextAdminActions.php';
+        require_once __DIR__ . '/src/ContextFrontendDetector.php';
+        require_once __DIR__ . '/src/ContextAiTestAction.php';
+        require_once __DIR__ . '/src/ContextExportFormats.php';
+        require_once __DIR__ . '/src/ContextSiteInspector.php';
+        require_once __DIR__ . '/src/ContextWebHelper.php';
         foreach(self::$configDefaults as $key => $value) {
             $this->$key = $value;
         }
@@ -81,6 +112,82 @@ class Context extends Process implements Module, ConfigurableModule {
 
     /** @var ContextAI|null */
     protected $_ai = null;
+
+    /** @var ContextToon|null */
+    protected $_toon = null;
+
+    /** @var ContextSampleSerializer|null */
+    protected $_sampleSerializer = null;
+
+    /** @var ContextFilesystem|null */
+    protected $_filesystem = null;
+
+    /** @var ContextStructureExporter|null */
+    protected $_structureExporter = null;
+
+    /** @var ContextTemplateExporter|null */
+    protected $_templateExporter = null;
+
+    /** @var ContextSampleExporter|null */
+    protected $_sampleExporter = null;
+
+    /** @var ContextApiExporter|null */
+    protected $_apiExporter = null;
+
+    /** @var ContextMetadataExporter|null */
+    protected $_metadataExporter = null;
+
+    /** @var ContextPromptExporter|null */
+    protected $_promptExporter = null;
+
+    /** @var ContextPromptTemplates|null */
+    protected $_promptTemplates = null;
+
+    /** @var ContextIntegrationExporter|null */
+    protected $_integrationExporter = null;
+
+    /** @var ContextSystemExporter|null */
+    protected $_systemExporter = null;
+
+    /** @var ContextDocsExporter|null */
+    protected $_docsExporter = null;
+
+    /** @var ContextArchiveDownloader|null */
+    protected $_archiveDownloader = null;
+
+    /** @var ContextAdminActions|null */
+    protected $_adminActions = null;
+
+    /** @var ContextFrontendDetector|null */
+    protected $_frontendDetector = null;
+
+    /** @var ContextAiTestAction|null */
+    protected $_aiTestAction = null;
+
+    /** @var ContextExportFormats|null */
+    protected $_exportFormatsHelper = null;
+
+    /** @var ContextSiteInspector|null */
+    protected $_siteInspector = null;
+
+    /** @var ContextWebHelper|null */
+    protected $_webHelper = null;
+
+    /** @var bool Whether JSON/CSV files are expected in the final export artifact. */
+    protected $_exportJsonFormat = true;
+
+    /** @var bool Whether CSV files are expected in the final export artifact. */
+    protected $_exportCsvFormat = true;
+
+    /** @var bool */
+    protected $_cliHandled = false;
+
+    /**
+     * Process modules default to non-autoload; Context needs boot-time hooks and CLI dispatch.
+     */
+    public function isAutoload() {
+        return true;
+    }
 
     /**
      * Get the AI gateway instance.
@@ -113,9 +220,11 @@ class Context extends Process implements Module, ConfigurableModule {
      */
     public function init() {
         parent::init();
+        $this->applyExportFormats();
         
         // Register API variable
         $this->wire('context', $this);
+        $this->dispatchCliCommand();
         
         // Auto-update if enabled
         if($this->auto_update) {
@@ -128,12 +237,17 @@ class Context extends Process implements Module, ConfigurableModule {
      * ProcessWire ready - handle CLI commands
      */
     public function ready() {
-        if(PHP_SAPI === 'cli') {
-            $argv = $GLOBALS['argv'] ?? [];
-            if(!empty($argv[1]) && strpos($argv[1], '--context-') === 0) {
-                $action = str_replace('--context-', '', $argv[1]);
-                $this->handleCLI($action, $argv);
-            }
+        $this->dispatchCliCommand();
+    }
+
+    protected function dispatchCliCommand() {
+        if($this->_cliHandled || PHP_SAPI !== 'cli') return;
+
+        $argv = $GLOBALS['argv'] ?? [];
+        if(!empty($argv[1]) && strpos($argv[1], '--context-') === 0) {
+            $this->_cliHandled = true;
+            $action = str_replace('--context-', '', $argv[1]);
+            $this->handleCLI($action, $argv);
         }
     }
 
@@ -141,778 +255,301 @@ class Context extends Process implements Module, ConfigurableModule {
      * Handle CLI commands
      */
     protected function handleCLI($action, $argv) {
-        switch($action) {
-            case 'export':
-                $this->cliExport($argv);
-                break;
-            case 'stats':
-                $this->cliStats();
-                break;
-            case 'query':
-                $this->cliQuery($argv);
-                break;
-            case 'eval':
-                $this->cliEval($argv);
-                break;
-            case 'stdin':
-                $this->cliStdin();
-                break;
-            case 'help':
-                $this->cliHelp();
-                break;
-            default:
-                echo "Unknown command: --context-{$action}\n";
-                $this->cliHelp();
-                exit(1);
-        }
-        exit(0);
+        (new ContextCli($this))->handle($action, $argv);
     }
 
-    /**
-     * CLI Export command
-     */
+    protected function aiTestAction() {
+        if($this->_aiTestAction === null) {
+            $this->_aiTestAction = new ContextAiTestAction($this);
+        }
+        return $this->_aiTestAction;
+    }
 
     /**
      * AJAX endpoint: test AI gateway connection
      * Called at /setup/context/ai-test/
      */
     public function executeAiTest() {
-        header('Content-Type: application/json');
-        
-        if(!$this->config->ajax) {
-            echo json_encode(['success' => false, 'error' => 'AJAX only']);
-            exit;
-        }
-
-        $ai = $this->ai();
-        
-        if(!$ai->isEnabled()) {
-            echo json_encode(['success' => false, 'error' => 'AI Gateway is not enabled or API key is missing']);
-            exit;
-        }
-
-        $start = microtime(true);
-        $result = $ai->chat([
-            'messages'   => [['role' => 'user', 'content' => 'Reply with only the word: OK']],
-            'max_tokens' => 10,
-            'caller'     => 'Context::testConnection',
-        ]);
-        $ms = round((microtime(true) - $start) * 1000);
-
-        if(isset($result['error'])) {
-            echo json_encode(['success' => false, 'error' => $result['error']]);
-        } else {
-            echo json_encode([
-                'success' => true,
-                'model'   => $result['model'] ?? 'unknown',
-                'ms'      => $ms,
-                'content' => trim($result['content'] ?? ''),
-            ]);
-        }
-        exit;
-    }
-
-    protected function cliExport($argv) {
-        echo "🚀 Starting Context export...\n\n";
-        
-        $toonOnly = in_array('--toon-only', $argv);
-        $jsonOnly = in_array('--json-only', $argv);
-        
-        if($toonOnly) {
-            $this->export_toon_format = 1;
-            echo "📦 Mode: TOON format only\n";
-        } else if($jsonOnly) {
-            $this->export_toon_format = 0;
-            echo "📦 Mode: JSON format only\n";
-        }
-        
-        try {
-            $startTime = microtime(true);
-            $aiPath = $this->ensureFolder($this->getContextPath());
-            
-            echo "📁 Export path: {$aiPath}\n\n";
-            
-            // Run export
-            $this->exportAll($aiPath);
-            
-            $duration = round(microtime(true) - $startTime, 2);
-            
-            echo "\n✅ Context exported successfully!\n";
-            echo "⏱️  Completed in {$duration} seconds\n";
-            echo "📂 Files available at: {$aiPath}\n";
-            
-        } catch(\Exception $e) {
-            echo "\n❌ Export failed: " . $e->getMessage() . "\n";
-            exit(1);
-        }
+        $this->aiTestAction()->execute();
     }
 
     /**
-     * Export all files (for CLI)
+     * Export all files (shared CLI/admin pipeline).
      */
-    protected function exportAll($aiPath) {
-        echo "📄 Exporting structure...\n";
-        $structure = $this->buildPageTree($this->pages->get('/'), 0, $this->max_depth);
-        file_put_contents($aiPath . 'structure.json', json_encode($structure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
-        if($this->export_toon_format) {
-            file_put_contents($aiPath . 'structure.toon', $this->convertToToon($structure));
-        }
-        
-        $asciiTree = $this->buildAsciiTree($this->pages->get('/'), 0, '', true, $this->max_depth);
-        file_put_contents($aiPath . 'structure.txt', $asciiTree);
-        
-        echo "📝 Exporting templates...\n";
-        $templates = $this->exportTemplates();
-        
-        echo "🌳 Exporting complete tree...\n";
-        $tree = $this->exportTree();
-        file_put_contents($aiPath . 'tree.json', json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
-        if($this->export_toon_format) {
-            file_put_contents($aiPath . 'tree.toon', $this->convertToToon($tree));
-        }
-        
-        $this->exportMatrixTemplates();
-        $this->exportTemplatesToCSV();
-        
-        echo "⚙️  Exporting configuration...\n";
-        $config = $this->exportConfig();
-        file_put_contents($aiPath . 'config.json', json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
-        if($this->export_toon_format) {
-            file_put_contents($aiPath . 'config.toon', $this->convertToToon($config));
-        }
-        
-        echo "🔌 Exporting modules...\n";
-        $modules = $this->exportModules();
-        file_put_contents($aiPath . 'modules.json', json_encode($modules, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
-        if($this->export_toon_format) {
-            file_put_contents($aiPath . 'modules.toon', $this->convertToToon(['modules' => $modules]));
-        }
-        
-        $classes = $this->exportCustomClasses();
-        if(!empty($classes)) {
-            file_put_contents($aiPath . 'classes.json', json_encode($classes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'classes.toon', $this->convertToToon(['classes' => $classes]));
-            }
-        }
-        
-        if($this->export_samples) {
-            echo "📦 Exporting samples...\n";
-            $this->createSamples();
-        }
-        
-        if($this->export_api_docs) {
-            echo "🔗 Exporting API docs...\n";
-            $this->createApiDocs();
-        }
-        
-        if($this->export_routes) {
-            echo "🗺️  Exporting routes...\n";
-            $this->createRoutes();
-        }
-        
-        if($this->export_snippets) {
-            echo "💻 Exporting snippets...\n";
-            $this->createSnippets();
-        }
-        
-        if($this->export_prompts) {
-            echo "📋 Exporting prompts...\n";
-            $this->createPrompts();
-        }
-        
-        if($this->export_field_definitions) {
-            echo "📊 Exporting field definitions...\n";
-            $this->exportFieldDefinitions();
-        }
-        
-        if($this->export_performance) {
-            echo "⚡ Exporting performance metrics...\n";
-            $this->createPerformanceMetrics();
-        }
-        
-        if($this->export_integrations) {
-            echo "🔗 Exporting integrations...\n";
-            $this->createIntegrations();
-        }
-        
-        echo "📖 Creating README...\n";
-        file_put_contents($aiPath . 'README.md', $this->createReadme());
-        
-        if($this->generate_skill_md) {
-            echo "🤖 Generating SKILL.md...\n";
-            file_put_contents($aiPath . 'SKILL.md', $this->createSkillMd());
-        }
-    }
-
-    /**
-     * CLI Stats command
-     */
-    protected function cliStats() {
-        echo "📊 Context Module Statistics\n";
-        echo str_repeat('=', 60) . "\n\n";
-        
-        $templates = 0;
-        foreach($this->templates as $t) {
-            if(!($t->flags & Template::flagSystem)) $templates++;
-        }
-        
-        $fields = 0;
-        foreach($this->fields as $f) {
-            if(!($f->flags & Field::flagSystem)) $fields++;
-        }
-        
-        $pages = $this->pages->count("id>0");
-        
-        $contextPath = $this->getContextPath();
-        $exportSize = 0;
-        if(is_dir($contextPath)) {
-            $exportSize = $this->getDirectorySize($contextPath);
-        }
-        
-        echo "Templates:      {$templates}\n";
-        echo "Fields:         {$fields}\n";
-        echo "Pages:          {$pages}\n";
-        echo "\n";
-        echo "Export Path:    {$contextPath}\n";
-        echo "Export Size:    " . $this->formatBytes($exportSize) . "\n";
-        echo "\n";
-        
-        // Configuration
-        echo "Configuration:\n";
-        echo "  TOON Format:  " . ($this->export_toon_format ? 'Enabled' : 'Disabled') . "\n";
-        echo "  Samples:      " . ($this->export_samples ? 'Enabled' : 'Disabled') . "\n";
-        echo "  SKILL.md:     " . ($this->generate_skill_md ? 'Enabled' : 'Disabled') . "\n";
-        echo "\n";
-    }
-
-    /**
-     * CLI Query command
-     */
-    protected function cliQuery($argv) {
-        if(empty($argv[2])) {
-            echo "❌ Error: Query parameter required\n";
-            echo "Usage: php index.php --context-query \"templates\"\n";
-            exit(1);
-        }
-        
-        $query = $argv[2];
-        
-        switch($query) {
-            case 'templates':
-                $this->cliQueryTemplates();
-                break;
-            case 'fields':
-                $this->cliQueryFields();
-                break;
-            case 'pages':
-                $this->cliQueryPages($argv);
-                break;
-            default:
-                echo "❌ Unknown query: {$query}\n";
-                echo "Available queries: templates, fields, pages\n";
-                exit(1);
-        }
-    }
-
-    /**
-     * Query templates
-     */
-    protected function cliQueryTemplates() {
-        echo "📝 Templates:\n\n";
-        
-        foreach($this->templates as $t) {
-            if($t->flags & Template::flagSystem) continue;
-            
-            $fieldCount = count($t->fields);
-            $pageCount = $this->pages->count("template={$t->name}");
-            
-            echo "  • {$t->name}\n";
-            echo "    Label: {$t->label}\n";
-            echo "    Fields: {$fieldCount}\n";
-            echo "    Pages: {$pageCount}\n";
-            echo "\n";
-        }
-    }
-
-    /**
-     * Query fields
-     */
-    protected function cliQueryFields() {
-        echo "📋 Fields:\n\n";
-        
-        foreach($this->fields as $f) {
-            if($f->flags & Field::flagSystem) continue;
-            
-            echo "  • {$f->name}\n";
-            echo "    Type: {$f->type}\n";
-            echo "    Label: {$f->label}\n";
-            echo "\n";
-        }
-    }
-
-    /**
-     * Query pages
-     */
-    protected function cliQueryPages($argv) {
-        $selector = isset($argv[3]) ? $argv[3] : 'limit=10';
-        
-        echo "📄 Pages ({$selector}):\n\n";
-        
-        $pages = $this->pages->find($selector);
-        
-        foreach($pages as $p) {
-            echo "  • {$p->title}\n";
-            echo "    ID: {$p->id}\n";
-            echo "    Template: {$p->template->name}\n";
-            echo "    URL: {$p->url}\n";
-            echo "\n";
-        }
-        
-        echo "Total: " . count($pages) . " pages\n";
-    }
-
-    /**
-     * CLI Eval - Execute PHP code with ProcessWire API access
-     */
-    protected function cliEval($argv) {
-        if(empty($argv[2])) {
-            echo "❌ Error: Code parameter required\n";
-            echo "Usage: php index.php --context-eval 'echo \$pages->count();'\n";
-            exit(1);
-        }
-        
-        $code = $argv[2];
-        
-        // Make all ProcessWire API variables available
-        $pages = $this->pages;
-        $templates = $this->templates;
-        $fields = $this->fields;
-        $modules = $this->modules;
-        $config = $this->config;
-        $users = $this->users;
-        $session = $this->session;
-        $input = $this->input;
-        $sanitizer = $this->sanitizer;
-        $database = $this->database;
-        $cache = $this->cache;
-        $log = $this->log;
-        $files = $this->files;
-        $context = $this;
-        
-        // Add ProcessWire namespace to code
-        $code = '?>' . '<?php namespace ProcessWire; ' . $code;
-        
-        try {
-            eval($code);
-        } catch(\Throwable $e) {
-            echo "❌ Error: " . $e->getMessage() . "\n";
-            echo "   Line: " . $e->getLine() . "\n";
-            exit(1);
-        }
-    }
-
-    /**
-     * CLI Stdin - Execute multi-line PHP code from stdin
-     */
-    protected function cliStdin() {
-        $code = file_get_contents('php://stdin');
-        
-        if(empty(trim($code))) {
-            echo "❌ Error: No code provided via stdin\n";
-            echo "Usage: echo 'CODE' | php index.php --context-stdin\n";
-            exit(1);
-        }
-        
-        // Make all ProcessWire API variables available
-        $pages = $this->pages;
-        $templates = $this->templates;
-        $fields = $this->fields;
-        $modules = $this->modules;
-        $config = $this->config;
-        $users = $this->users;
-        $session = $this->session;
-        $input = $this->input;
-        $sanitizer = $this->sanitizer;
-        $database = $this->database;
-        $cache = $this->cache;
-        $log = $this->log;
-        $files = $this->files;
-        $context = $this;
-        
-        // Add ProcessWire namespace to code
-        $code = '?>' . '<?php namespace ProcessWire; ' . $code;
-        
-        try {
-            eval($code);
-        } catch(\Throwable $e) {
-            echo "❌ Error: " . $e->getMessage() . "\n";
-            echo "   Line: " . $e->getLine() . "\n";
-            exit(1);
-        }
-    }
-
-    /**
-     * CLI Help
-     */
-    protected function cliHelp() {
-        echo "\n";
-        echo "ProcessWire Context Module - CLI Commands\n";
-        echo str_repeat('=', 60) . "\n\n";
-        echo "Usage:\n";
-        echo "  php index.php --context-export [options]\n";
-        echo "  php index.php --context-stats\n";
-        echo "  php index.php --context-query <type> [selector]\n";
-        echo "  php index.php --context-eval 'CODE'\n";
-        echo "  echo 'CODE' | php index.php --context-stdin\n";
-        echo "  php index.php --context-help\n";
-        echo "\n";
-        echo "Export Commands:\n";
-        echo "  --context-export              Full export (JSON + TOON)\n";
-        echo "  --context-export --toon-only  Export only TOON format\n";
-        echo "  --context-export --json-only  Export only JSON format\n";
-        echo "\n";
-        echo "Query Commands:\n";
-        echo "  --context-query templates     List all templates\n";
-        echo "  --context-query fields        List all fields\n";
-        echo "  --context-query pages [sel]   List pages (with optional selector)\n";
-        echo "\n";
-        echo "API Access Commands:\n";
-        echo "  --context-eval 'CODE'         Execute PHP code with PW API access\n";
-        echo "  echo 'CODE' | --context-stdin Execute multi-line code from stdin\n";
-        echo "\n";
-        echo "Stats Commands:\n";
-        echo "  --context-stats               Show module statistics\n";
-        echo "\n";
-        echo "Examples:\n";
-        echo "  # Export\n";
-        echo "  php index.php --context-export\n";
-        echo "  php index.php --context-export --toon-only\n";
-        echo "\n";
-        echo "  # Query\n";
-        echo "  php index.php --context-query templates\n";
-        echo "  php index.php --context-query pages \"template=product, limit=5\"\n";
-        echo "\n";
-        echo "  # API Access\n";
-        echo "  php index.php --context-eval 'echo \$pages->count() . \" pages\\n\";'\n";
-        echo "  php index.php --context-eval '\$p = \$pages->get(1); echo \$p->title;'\n";
-        echo "\n";
-        echo "  # Multi-line code\n";
-        echo "  echo 'foreach(\$templates as \$t) {\n";
-        echo "    if(\$t->flags & Template::flagSystem) continue;\n";
-        echo "    echo \$t->name . \"\\n\";\n";
-        echo "  }' | php index.php --context-stdin\n";
-        echo "\n";
-    }
-
-    /**
-     * Get directory size
-     */
-    protected function getDirectorySize($path) {
-        $size = 0;
-        foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path)) as $file) {
-            if($file->isFile()) {
-                $size += $file->getSize();
-            }
-        }
-        return $size;
-    }
-
-    /**
-     * Format bytes
-     */
-    protected function formatBytes($bytes, $precision = 2) {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1 << (10 * $pow));
-        return round($bytes, $precision) . ' ' . $units[$pow];
+    protected function exportAll($aiPath, ?callable $progress = null) {
+        (new ContextExporter($this))->export($aiPath, $progress);
     }
 
     /**
      * Auto-update on changes
      */
     public function autoUpdate($event) {
-        try {
-            $contextPath = $this->ensureFolder($this->getContextPath());
-            
-            // Update core files
-            $this->exportTemplates();
-            
-            // Update structure
-            $structure = $this->buildPageTree($this->pages->get('/'), 0, $this->max_depth);
-            file_put_contents($contextPath . 'structure.json', json_encode($structure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            $asciiTree = $this->buildAsciiTree($this->pages->get('/'), 0, '', true, $this->max_depth);
-            file_put_contents($contextPath . 'structure.txt', $asciiTree);
-            
-            // Update config
-            $config = $this->exportConfig();
-            file_put_contents($contextPath . 'config.json', json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($contextPath . 'structure.toon', $this->convertToToon($structure));
-                file_put_contents($contextPath . 'config.toon', $this->convertToToon($config));
-            }
-            
-            $this->log('Context auto-updated: templates, structure, config' . ($this->export_toon_format ? ' (JSON + TOON)' : ''));
-        } catch(\Exception $e) {
-            $this->log('Context auto-update failed: ' . $e->getMessage());
+        (new ContextAutoUpdater($this))->handle($event);
+    }
+
+    protected function filesystem() {
+        if($this->_filesystem === null) {
+            $this->_filesystem = new ContextFilesystem($this);
         }
+        return $this->_filesystem;
+    }
+
+    protected function structureExporter() {
+        if($this->_structureExporter === null) {
+            $this->_structureExporter = new ContextStructureExporter($this);
+        }
+        return $this->_structureExporter;
+    }
+
+    protected function templateExporter() {
+        if($this->_templateExporter === null) {
+            $this->_templateExporter = new ContextTemplateExporter($this);
+        }
+        return $this->_templateExporter;
+    }
+
+    protected function sampleExporter() {
+        if($this->_sampleExporter === null) {
+            $this->_sampleExporter = new ContextSampleExporter($this);
+        }
+        return $this->_sampleExporter;
+    }
+
+    protected function apiExporter() {
+        if($this->_apiExporter === null) {
+            $this->_apiExporter = new ContextApiExporter($this);
+        }
+        return $this->_apiExporter;
+    }
+
+    protected function metadataExporter() {
+        if($this->_metadataExporter === null) {
+            $this->_metadataExporter = new ContextMetadataExporter($this);
+        }
+        return $this->_metadataExporter;
+    }
+
+    protected function promptExporter() {
+        if($this->_promptExporter === null) {
+            $this->_promptExporter = new ContextPromptExporter($this);
+        }
+        return $this->_promptExporter;
+    }
+
+    protected function promptTemplates() {
+        if($this->_promptTemplates === null) {
+            $this->_promptTemplates = new ContextPromptTemplates($this);
+        }
+        return $this->_promptTemplates;
+    }
+
+    protected function integrationExporter() {
+        if($this->_integrationExporter === null) {
+            $this->_integrationExporter = new ContextIntegrationExporter($this);
+        }
+        return $this->_integrationExporter;
+    }
+
+    protected function systemExporter() {
+        if($this->_systemExporter === null) {
+            $this->_systemExporter = new ContextSystemExporter($this);
+        }
+        return $this->_systemExporter;
+    }
+
+    protected function docsExporter() {
+        if($this->_docsExporter === null) {
+            $this->_docsExporter = new ContextDocsExporter($this);
+        }
+        return $this->_docsExporter;
+    }
+
+    protected function archiveDownloader() {
+        if($this->_archiveDownloader === null) {
+            $this->_archiveDownloader = new ContextArchiveDownloader($this);
+        }
+        return $this->_archiveDownloader;
+    }
+
+    protected function adminActions() {
+        if($this->_adminActions === null) {
+            $this->_adminActions = new ContextAdminActions($this);
+        }
+        return $this->_adminActions;
+    }
+
+    protected function frontendDetector() {
+        if($this->_frontendDetector === null) {
+            $this->_frontendDetector = new ContextFrontendDetector($this);
+        }
+        return $this->_frontendDetector;
+    }
+
+    protected function exportFormatsHelper() {
+        if($this->_exportFormatsHelper === null) {
+            $this->_exportFormatsHelper = new ContextExportFormats($this);
+        }
+        return $this->_exportFormatsHelper;
+    }
+
+    protected function siteInspector() {
+        if($this->_siteInspector === null) {
+            $this->_siteInspector = new ContextSiteInspector($this);
+        }
+        return $this->_siteInspector;
+    }
+
+    protected function webHelper() {
+        if($this->_webHelper === null) {
+            $this->_webHelper = new ContextWebHelper($this);
+        }
+        return $this->_webHelper;
     }
 
     protected function getContextPath() {
-        $path = $this->export_path ?: 'site/assets/cache/context/';
-        
-        // Check if absolute path (starts with /)
-        if(strpos($path, '/') === 0) {
-            // Absolute path - use as-is
-            return rtrim($path, '/') . '/';
-        }
-        
-        // Normalize relative path - remove leading/trailing slashes
-        $path = trim($path, '/');
-        
-        // Relative path - add to PW root
-        return $this->config->paths->root . $path . '/';
+        return $this->filesystem()->getContextPath();
     }
 
     protected function ensureFolder($path) {
-        if(!is_dir($path)) {
-            if(!wireMkdir($path, true)) {
-                throw new WireException("Cannot create folder: $path");
-            }
+        return $this->filesystem()->ensureFolder($path);
+    }
+
+    protected function validateContextPath($path) {
+        $this->filesystem()->validateContextPath($path);
+    }
+
+    protected function normalizeFilesystemPath($path) {
+        return $this->filesystem()->normalizePath($path);
+    }
+
+    protected function writeFile($path, $contents) {
+        return $this->filesystem()->writeFile($path, $contents);
+    }
+
+    protected function readFile($path, $maxBytes = null) {
+        return $this->filesystem()->readFile($path, $maxBytes);
+    }
+
+    protected function readJsonFile($path) {
+        return $this->filesystem()->readJsonFile($path);
+    }
+
+    protected function writeJsonFile($path, $data, $flags = null) {
+        return $this->filesystem()->writeJsonFile($path, $data, $flags);
+    }
+
+    protected function writeToonFile($path, $data) {
+        return $this->filesystem()->writeToonFile($path, $data);
+    }
+
+    protected function sendJsonResponse(array $data) {
+        $this->webHelper()->sendJsonResponse($data);
+    }
+
+    protected function hasContextAccess() {
+        return $this->webHelper()->hasContextAccess();
+    }
+
+    protected function requireContextAccess() {
+        $this->webHelper()->requireContextAccess();
+    }
+
+    protected function hasValidCsrfToken() {
+        return $this->webHelper()->hasValidCsrfToken();
+    }
+
+    protected function requirePostCsrf() {
+        $this->webHelper()->requirePostCsrf();
+    }
+
+    protected function getCsrfInputMarkup() {
+        return $this->webHelper()->getCsrfInputMarkup();
+    }
+
+    public static function normalizeStaticExportFormats($formats = null, $legacyToon = 1) {
+        if(!class_exists(__NAMESPACE__ . '\\ContextExportFormats')) {
+            require_once __DIR__ . '/src/ContextExportFormats.php';
         }
-        
-        // Always ensure .htaccess exists for protection
-        $htaccess = $path . '.htaccess';
-        if(!file_exists($htaccess)) {
-            $content = "# Deny access to Context exports\n";
-            $content .= "# Remove this file if you need public access\n";
-            $content .= "Deny from all\n";
-            file_put_contents($htaccess, $content);
+        return ContextExportFormats::normalize($formats, $legacyToon);
+    }
+
+    protected function normalizeExportFormats($formats = null) {
+        return $this->exportFormatsHelper()->normalizeModuleFormats($formats);
+    }
+
+    protected function applyExportFormats($formats = null) {
+        return $this->exportFormatsHelper()->apply($formats);
+    }
+
+    protected function exportFormatLabel(?array $formats = null) {
+        return $this->exportFormatsHelper()->label($formats);
+    }
+
+    protected function setExportFormatFlag($property, $value) {
+        if($property === '_exportJsonFormat') {
+            $this->_exportJsonFormat = (bool)$value;
+        } elseif($property === '_exportCsvFormat') {
+            $this->_exportCsvFormat = (bool)$value;
         }
-        
-        return $path;
+    }
+
+    public function isJsonExportEnabled() {
+        return $this->_exportJsonFormat;
+    }
+
+    public function isCsvExportEnabled() {
+        return $this->_exportCsvFormat;
+    }
+
+    public static function getConfigDefaults() {
+        return self::$configDefaults;
+    }
+
+    protected function html($value) {
+        return $this->webHelper()->html($value);
+    }
+
+    protected function attr($value) {
+        return $this->webHelper()->attr($value);
+    }
+
+    protected function isSensitiveSampleField(Field $field) {
+        return $this->sampleSerializer()->isSensitiveField($field);
+    }
+
+    protected function pruneExportFormats($path, array $extensions) {
+        return $this->filesystem()->pruneExportFormats($path, $extensions);
+    }
+
+    protected function removeExportPath($basePath, $relativePath) {
+        return $this->filesystem()->removeExportPath($basePath, $relativePath);
+    }
+
+    protected function removeEmptyExportDirectory($basePath, $relativePath) {
+        return $this->filesystem()->removeEmptyExportDirectory($basePath, $relativePath);
+    }
+
+    protected function isPathInsideExportRoot($path, $root) {
+        return $this->filesystem()->isPathInsideExportRoot($path, $root);
+    }
+
+    protected function contextFileName($baseName) {
+        $extension = $this->export_toon_format ? 'toon' : 'json';
+        return $baseName . '.' . $extension;
     }
 
     /**
      * Build page tree (JSON)
      */
     protected function buildPageTree(Page $page, $depth = 0, $maxDepth = 10) {
-        if($depth > $maxDepth) return null;
-        
-        // Skip system templates
-        if($page->template && ($page->template->flags & Template::flagSystem)) {
-            return null;
-        }
-
-        // Get all children including hidden/unpublished
-        $children = $page->children("include=all");
-        $numChildren = $children->count();
-
-        $data = [
-            'id' => $page->id,
-            'name' => $page->name,
-            'title' => $page->title,
-            'template' => $page->template->name,
-            'template_id' => $page->template->id,
-            'template_label' => $page->template->label ?: $page->template->name,
-            'url' => $page->url,
-            'parent_id' => $page->parent->id,
-            'created' => date('Y-m-d H:i:s', $page->created),
-            'modified' => date('Y-m-d H:i:s', $page->modified),
-            'status' => $page->status,
-            'numChildren' => $numChildren
-        ];
-
-        if($numChildren > 0) {
-            // Limit children export to keep JSON file manageable
-            $childLimit = $this->json_child_limit ?: 20;
-            
-            // Smart collapse: show first N + all items with children
-            if($numChildren > $childLimit && $depth >= 1) {
-                // Separate children into two groups
-                $regularItems = [];
-                $nestedItems = [];
-                
-                foreach($children as $child) {
-                    if($child->template && ($child->template->flags & Template::flagSystem)) {
-                        continue;
-                    }
-                    
-                    $childChildren = $child->children("include=all")->count();
-                    if($childChildren > 0) {
-                        $nestedItems[] = $child;
-                    } else {
-                        $regularItems[] = $child;
-                    }
-                }
-                
-                // Check if all regular items have same template
-                $templates = [];
-                foreach(array_slice($regularItems, 0, 5) as $item) {
-                    $templates[$item->template->name] = true;
-                }
-                $allSameTemplate = count($templates) === 1;
-                
-                $data['children'] = [];
-                
-                // Show first N regular items
-                $shownCount = 0;
-                foreach($regularItems as $item) {
-                    if($shownCount >= $childLimit) break;
-                    $childData = $this->buildPageTree($item, $depth + 1, $maxDepth);
-                    if($childData) {
-                        $data['children'][] = $childData;
-                        $shownCount++;
-                    }
-                }
-                
-                // Always show ALL items with children (nested structure)
-                foreach($nestedItems as $item) {
-                    $childData = $this->buildPageTree($item, $depth + 1, $maxDepth);
-                    if($childData) {
-                        $data['children'][] = $childData;
-                    }
-                }
-                
-                // Add note about hidden items
-                $hiddenCount = count($regularItems) - $shownCount;
-                if($hiddenCount > 0) {
-                    $childTemplate = $allSameTemplate ? array_key_first($templates) : 'items';
-                    $data['children_note'] = "Showing first {$childLimit} regular items + " . count($nestedItems) . " nested items. {$hiddenCount} more {$childTemplate} hidden (total: {$numChildren})";
-                } elseif(count($nestedItems) > 0) {
-                    $data['children_note'] = "Showing all " . count($regularItems) . " regular items + " . count($nestedItems) . " nested items";
-                }
-            } else {
-                // Normal export for small lists
-                $data['children'] = [];
-                foreach($children as $child) {
-                    $childData = $this->buildPageTree($child, $depth + 1, $maxDepth);
-                    if($childData) $data['children'][] = $childData;
-                }
-            }
-        }
-
-        return $data;
+        return $this->structureExporter()->buildPageTree($page, $depth, $maxDepth);
     }
 
     /**
      * Build ASCII tree with smart collapsing for large homogeneous lists
      */
     protected function buildAsciiTree(Page $page, $depth = 0, $prefix = '', $isLast = true, $maxDepth = 10) {
-        if($depth > $maxDepth) return '';
-        
-        // Skip system templates (like admin pages), but process the page
-        if($page->template && ($page->template->flags & Template::flagSystem)) {
-            return '';
-        }
-
-        $output = '';
-        
-        if($depth > 0) {
-            $connector = $isLast ? '└─ ' : '├─ ';
-            $output .= $prefix . $connector;
-        }
-
-        // Get children count including hidden/unpublished
-        $children = $page->children("include=all");
-        $childCount = $children->count();
-        
-        $itemCount = $childCount > 0 ? " (items: {$childCount})" : '';
-        $output .= "{$page->title} [template: {$page->template->name}]{$itemCount}\n";
-
-        if($childCount > 0) {
-            
-            // Smart collapsing configuration
-            $threshold = $this->compact_mode ? 30 : 50; // Show up to 50 items (30 in compact mode)
-            $alwaysExpandTemplates = ['category']; // Templates that should never collapse
-            
-            $newPrefix = $prefix;
-            if($depth > 0) {
-                $newPrefix .= $isLast ? '    ' : '│   ';
-            }
-            
-            // Check if all children have the same template
-            $templates = [];
-            $anyChildHasChildren = false;
-            foreach($children as $child) {
-                // Skip system templates
-                if($child->template && ($child->template->flags & Template::flagSystem)) {
-                    continue;
-                }
-                
-                $templates[$child->template->name] = true;
-                // Check if this child has children (including hidden)
-                if($child->children("include=all")->count() > 0) {
-                    $anyChildHasChildren = true;
-                }
-            }
-            
-            $allSameTemplate = count($templates) === 1;
-            $childTemplate = $allSameTemplate ? array_key_first($templates) : '';
-            $shouldAlwaysExpand = in_array($childTemplate, $alwaysExpandTemplates);
-            
-            // Collapse if: depth >= 1 AND count > threshold AND all same template AND not always-expand
-            // Smart handling: show first N + all items with children
-            if($depth >= 1 && $allSameTemplate && !$shouldAlwaysExpand && 
-               $childCount > $threshold) {
-                
-                // First pass: show items up to threshold OR items with children
-                $count = 0;
-                $itemsWithChildren = [];
-                $regularItems = [];
-                
-                foreach($children as $index => $child) {
-                    if($child->template && ($child->template->flags & Template::flagSystem)) {
-                        continue;
-                    }
-                    
-                    if($child->children("include=all")->count() > 0) {
-                        $itemsWithChildren[] = ['index' => $index, 'page' => $child];
-                    } else {
-                        $regularItems[] = ['index' => $index, 'page' => $child];
-                    }
-                }
-                
-                // Show first N regular items
-                $shownCount = 0;
-                foreach($regularItems as $item) {
-                    if($shownCount >= $threshold) break;
-                    $output .= $this->buildAsciiTree($item['page'], $depth + 1, $newPrefix, false, $maxDepth);
-                    $shownCount++;
-                }
-                
-                // Always show ALL items with children (nested structure)
-                foreach($itemsWithChildren as $item) {
-                    $isLastChild = (count($itemsWithChildren) === 0 && count($regularItems) <= $threshold);
-                    $output .= $this->buildAsciiTree($item['page'], $depth + 1, $newPrefix, false, $maxDepth);
-                }
-                
-                // Add "and more X elements" if we hid some regular items
-                $hiddenCount = count($regularItems) - $shownCount;
-                if($hiddenCount > 0) {
-                    $connector = '└─ ';
-                    $output .= $newPrefix . $connector;
-                    $output .= "and {$hiddenCount} more {$childTemplate} elements...\n";
-                }
-            } else {
-                // Show all children normally (small lists or mixed templates)
-                foreach($children as $index => $child) {
-                    $isLastChild = ($index === $childCount - 1);
-                    $output .= $this->buildAsciiTree($child, $depth + 1, $newPrefix, $isLastChild, $maxDepth);
-                }
-            }
-        }
-
-        return $output;
+        return $this->structureExporter()->buildAsciiTree($page, $depth, $prefix, $isLast, $maxDepth);
     }
 
     // -------------------------------------------------------------------------
@@ -929,30 +566,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * @return array
      */
     protected function getTableColumns(Field $field) {
-        $columns = [];
-        try {
-            // Use the official getColumnsByName() API
-            $cols = $field->type->getColumnsByName($field);
-            foreach($cols as $name => $col) {
-                if(empty($name)) continue;
-                $colData = [
-                    'name'  => $col['name'],
-                    'label' => $col['label'] ?: $col['name'],
-                    'type'  => $col['type'] ?: 'text',
-                ];
-                // Options: already an array after getColumn() processes them
-                if(!empty($col['options']) && is_array($col['options'])) {
-                    $colData['options'] = array_values(array_filter($col['options'], 'strlen'));
-                }
-                if(!empty($col['selector'])) {
-                    $colData['selector'] = $col['selector'];
-                }
-                $columns[] = $colData;
-            }
-        } catch(\Exception $e) {
-            $this->log("getTableColumns({$field->name}) failed: " . $e->getMessage());
-        }
-        return $columns;
+        return $this->templateExporter()->getTableColumns($field);
     }
 
     /**
@@ -966,34 +580,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * @return array
      */
     protected function getComboSubfields(Field $field) {
-        $subfields = [];
-        try {
-            // ComboField::getComboSettings() returns a ComboSettings object
-            $settings = $field->getComboSettings();
-            foreach($settings->getSubfields() as $sub) {
-                $subfieldData = [
-                    'name'        => $sub->name,
-                    'label'       => $sub->label ?: $sub->name,
-                    'type'        => $sub->type,
-                    'required'    => $sub->required ? 1 : 0,
-                    'columnWidth' => $sub->columnWidth ?: 100,
-                ];
-                if($sub->description) $subfieldData['description'] = $sub->description;
-                if($sub->notes)       $subfieldData['notes']       = $sub->notes;
-                // Options: stored in ComboSubfield->options (array or newline string)
-                if(!empty($sub->options)) {
-                    $opts = $sub->options;
-                    if(is_string($opts)) {
-                        $opts = array_values(array_filter(array_map('trim', explode("\n", $opts)), 'strlen'));
-                    }
-                    if(!empty($opts)) $subfieldData['options'] = $opts;
-                }
-                $subfields[] = $subfieldData;
-            }
-        } catch(\Exception $e) {
-            $this->log("getComboSubfields({$field->name}) failed: " . $e->getMessage());
-        }
-        return $subfields;
+        return $this->templateExporter()->getComboSubfields($field);
     }
 
     /**
@@ -1008,32 +595,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * @return array
      */
     protected function getMatrixTypesData(Field $field) {
-        $types = [];
-        try {
-            // getMatrixTypesInfo() returns all type data including Field objects
-            $typesInfo = $field->getMatrixTypesInfo();
-            foreach($typesInfo as $typeName => $typeInfo) {
-                $typeData = [
-                    'name'  => $typeName,
-                    'label' => $typeInfo['label'] ?: $typeName,
-                    'head'  => $typeInfo['head'] ?: '',
-                    'sort'  => (int)($typeInfo['sort'] ?? 0),
-                    'fields' => [],
-                ];
-                // $typeInfo['fields'] is [ fieldName => Field ] in template context
-                foreach($typeInfo['fields'] as $matrixField) {
-                    if(!($matrixField instanceof Field)) continue;
-                    if($matrixField->name === 'repeater_matrix_type') continue;
-                    $typeData['fields'][] = $this->buildFieldData($matrixField);
-                }
-                $types[] = $typeData;
-            }
-            // Sort by sort value
-            usort($types, function($a, $b) { return $a['sort'] - $b['sort']; });
-        } catch(\Exception $e) {
-            $this->log("getMatrixTypesData({$field->name}) failed: " . $e->getMessage());
-        }
-        return $types;
+        return $this->templateExporter()->getMatrixTypesData($field);
     }
 
     /**
@@ -1047,103 +609,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * @return array
      */
     protected function buildFieldData(Field $field) {
-        $data = [
-            'name'        => $field->name,
-            'type'        => $field->type->className(),
-            'label'       => $field->label,
-            'required'    => $field->required ? 1 : 0,
-            'columnWidth' => $field->columnWidth ?: 100,
-        ];
-        if($field->description) $data['description'] = $field->description;
-        if($field->notes)       $data['notes']       = $field->notes;
-
-        // Page reference
-        if($field->type instanceof FieldtypePage) {
-            $data['derefAsPage'] = $field->derefAsPage;
-            if($field->parent_id) {
-                $parent = $this->pages->get($field->parent_id);
-                if($parent && $parent->id) $data['parent'] = $parent->path;
-            }
-            if($field->template_id) {
-                $tmpl = $this->templates->get($field->template_id);
-                if($tmpl) $data['template'] = $tmpl->name;
-            }
-            if(!empty($field->template_ids) && is_array($field->template_ids)) {
-                $data['templates'] = [];
-                foreach($field->template_ids as $tid) {
-                    $t = $this->templates->get((int)$tid);
-                    if($t) $data['templates'][] = $t->name;
-                }
-            }
-            if($field->findPagesSelector) $data['selector'] = $field->findPagesSelector;
-            $data['inputfield'] = $field->inputfield;
-        }
-
-        // Selectable options
-        if($field->type instanceof FieldtypeOptions) {
-            $data['options'] = [];
-            try {
-                foreach($field->type->getOptions($field) as $opt) {
-                    $data['options'][] = [
-                        'id'    => $opt->id,
-                        'value' => $opt->value,
-                        'title' => $opt->title,
-                    ];
-                }
-            } catch(\Exception $e) {}
-        }
-
-        // Image / File
-        if($field->type instanceof FieldtypeImage || $field->type instanceof FieldtypeFile) {
-            $data['maxFiles']   = $field->maxFiles;
-            $data['extensions'] = $field->extensions;
-            if($field->type instanceof FieldtypeImage) {
-                if($field->maxWidth)  $data['maxWidth']  = $field->maxWidth;
-                if($field->maxHeight) $data['maxHeight'] = $field->maxHeight;
-            }
-        }
-
-        // Text / Textarea
-        $textTypes = ['FieldtypeText', 'FieldtypeTextarea'];
-        if(in_array($field->type->className(), $textTypes)) {
-            if($field->maxlength) $data['maxlength'] = $field->maxlength;
-            if($field->type->className() === 'FieldtypeTextarea') {
-                $data['rows']        = $field->rows;
-                $data['contentType'] = $field->contentType;
-            }
-        }
-
-        // ProFields: Table
-        if($field->type->className() === 'FieldtypeTable') {
-            $data['columns'] = $this->getTableColumns($field);
-        }
-
-        // ProFields: Combo
-        if($field->type->className() === 'FieldtypeCombo') {
-            $data['subfields'] = $this->getComboSubfields($field);
-        }
-
-        // Repeater (plain)
-        if($field->type->className() === 'FieldtypeRepeater') {
-            $data['repeaterFields'] = [];
-            $repTemplate = $this->templates->get("repeater_" . $field->name);
-            if($repTemplate) {
-                foreach($repTemplate->fields as $repField) {
-                    $data['repeaterFields'][] = [
-                        'name'  => $repField->name,
-                        'type'  => $repField->type->className(),
-                        'label' => $repField->label,
-                    ];
-                }
-            }
-        }
-
-        // ProFields: RepeaterMatrix
-        if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-            $data['matrix_types'] = $this->getMatrixTypesData($field);
-        }
-
-        return $data;
+        return $this->templateExporter()->buildFieldData($field);
     }
 
     // -------------------------------------------------------------------------
@@ -1154,108 +620,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * Export all templates with fields
      */
     protected function exportTemplates() {
-        $templates = [];
-
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-
-            $fields = [];
-            foreach($template->fields as $field) {
-                $fieldData = [
-                    'name' => $field->name,
-                    'type' => $field->type->className(),
-                    'label' => $field->label,
-                    'required' => $field->required ? 1 : null,
-                    'collapsed' => $field->collapsed !== Inputfield::collapsedNo ? $field->collapsed : null,
-                ];
-
-                // Image fields
-                if($field->type instanceof FieldtypeImage) {
-                    $fieldData['maxFiles'] = $field->maxFiles;
-                    $fieldData['extensions'] = $field->extensions;
-                    if($field->maxWidth) $fieldData['maxWidth'] = $field->maxWidth;
-                    if($field->maxHeight) $fieldData['maxHeight'] = $field->maxHeight;
-                }
-
-                // Page fields
-                if($field->type instanceof FieldtypePage) {
-                    $fieldData['inputfield'] = $field->inputfield;
-                    if($field->parent_id) $fieldData['parent_id'] = $field->parent_id;
-                    if($field->template_id) $fieldData['template_id'] = $field->template_id;
-                    if($field->findPagesSelector) $fieldData['selector'] = $field->findPagesSelector;
-                    $fieldData['derefAsPage'] = $field->derefAsPage;
-                }
-
-                // Options fields
-                if($field->type instanceof FieldtypeOptions) {
-                    $options = [];
-                    foreach($field->type->getOptions($field) as $option) {
-                        $options[] = $option->title;
-                    }
-                    $fieldData['options'] = $options;
-                }
-
-                // Repeater fields
-                if($field->type->className() === 'FieldtypeRepeater') {
-                    $fieldData['repeaterFields'] = [];
-                    $repeaterTemplate = $this->templates->get("repeater_" . $field->name);
-                    if($repeaterTemplate) {
-                        foreach($repeaterTemplate->fields as $repField) {
-                            $fieldData['repeaterFields'][] = [
-                                'name'  => $repField->name,
-                                'type'  => $repField->type->className(),
-                                'label' => $repField->label,
-                            ];
-                        }
-                    }
-                }
-
-                // ProFields: Table
-                if($field->type->className() === 'FieldtypeTable') {
-                    $fieldData['columns'] = $this->getTableColumns($field);
-                }
-
-                // ProFields: Combo
-                if($field->type->className() === 'FieldtypeCombo') {
-                    $fieldData['subfields'] = $this->getComboSubfields($field);
-                }
-
-                // ProFields: RepeaterMatrix
-                if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    $fieldData['matrix_types'] = $this->getMatrixTypesData($field);
-                }
-
-                if($field->notes) $fieldData['notes'] = $field->notes;
-                if($field->description) $fieldData['description'] = $field->description;
-                
-                $fields[] = $fieldData;
-            }
-
-            $templates[] = [
-                'name' => $template->name,
-                'id' => $template->id,
-                'label' => $template->label,
-                'fields' => $fields,
-                'fieldCount' => count($fields),
-                'pageCount' => $this->pages->count("template={$template->name}"),
-                'allowPageNum' => $template->allowPageNum,
-                'urlSegments' => $template->urlSegments
-            ];
-        }
-
-        try {
-            $aiPath = $this->getContextPath();
-            file_put_contents($aiPath . 'templates.json', json_encode($templates, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'templates.toon', $this->convertToToon(['templates' => $templates]));
-            }
-        } catch(\Exception $e) {
-            throw new WireException("Failed to export templates: " . $e->getMessage());
-        }
-
-        return $templates;
+        return $this->templateExporter()->exportTemplates();
     }
 
     /**
@@ -1266,3740 +631,286 @@ class Context extends Process implements Module, ConfigurableModule {
      * definitions (via buildFieldData).
      */
     protected function exportMatrixTemplates() {
-        $output = [];
-
-        foreach($this->fields as $field) {
-            if($field->type->className() !== 'FieldtypeRepeaterMatrix') continue;
-
-            $types = $this->getMatrixTypesData($field);
-            if(empty($types)) continue;
-
-            $output[] = [
-                'field'       => $field->name,
-                'field_label' => $field->label ?: $field->name,
-                'types'       => $types,
-            ];
-        }
-
-        if(empty($output)) {
-            $this->log("No RepeaterMatrix fields found — skipping matrix-templates export.");
-            return [];
-        }
-
-        $aiPath = $this->getContextPath();
-        $data   = ['matrix_templates' => $output];
-
-        file_put_contents($aiPath . 'matrix-templates.json',
-            json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        $this->log("Created matrix-templates.json (" . count($output) . " fields)");
-
-        if($this->export_toon_format) {
-            file_put_contents($aiPath . 'matrix-templates.toon', $this->convertToToon($data));
-            $this->log("Created matrix-templates.toon");
-        }
-
-        return $output;
+        return $this->templateExporter()->exportMatrixTemplates();
     }
     /**
      * Export complete site tree (templates with nested fields structure)
      * Technical overview without data - just the field architecture
      */
     protected function exportTree() {
-        $tree = [];
-        
-        $this->log("Building site tree (templates + fields)...");
-        
-        // Get all templates with their fields
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-            
-            $templateData = [
-                'name' => $template->name,
-                'label' => $template->label ?: $template->name,
-                'fields' => []
-            ];
-            
-            // Add all fields
-            foreach($template->fields as $field) {
-                $fieldData = [
-                    'name' => $field->name,
-                    'type' => $field->type->className(),
-                    'label' => $field->label
-                ];
-                
-                // Add subfield info for special types
-                if($field->type instanceof FieldtypePage) {
-                    if($field->template_id) {
-                        $refTemplate = $this->templates->get($field->template_id);
-                        if($refTemplate) {
-                            $fieldData['template'] = $refTemplate->name;
-                        }
-                    }
-                } elseif($field->type->className() === 'FieldtypeRepeater') {
-                    $repeaterTemplate = $this->templates->get("name=repeater_{$field->name}");
-                    if($repeaterTemplate) {
-                        $fieldData['subfields'] = [];
-                        foreach($repeaterTemplate->fields as $repField) {
-                            $subFieldData = [
-                                'name'  => $repField->name,
-                                'type'  => $repField->type->className(),
-                                'label' => $repField->label,
-                            ];
-                            if($repField->type instanceof FieldtypePage && $repField->template_id) {
-                                $refTemplate = $this->templates->get($repField->template_id);
-                                if($refTemplate) $subFieldData['template'] = $refTemplate->name;
-                            }
-                            $fieldData['subfields'][] = $subFieldData;
-                        }
-                    }
-                } elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    // ProFields: use official API via helper
-                    $fieldData['matrix_types'] = $this->getMatrixTypesData($field);
-                } elseif($field->type->className() === 'FieldtypeTable') {
-                    // ProFields: use official API via helper
-                    $fieldData['columns'] = $this->getTableColumns($field);
-                } elseif($field->type->className() === 'FieldtypeCombo') {
-                    // ProFields: use official API via helper
-                    $fieldData['subfields'] = $this->getComboSubfields($field);
-                }
-                
-                $templateData['fields'][] = $fieldData;
-            }
-            
-            $tree[] = $templateData;
-        }
-        
-        $this->log("Site tree built with " . count($tree) . " templates");
-        
-        return $tree;
-    }
-    
-    /**
-     * Build tree structure recursively (template names only, no fields)
-     * DEPRECATED - no longer used
-     */
-    protected function buildTreeStructure($page, $depth = 0) {
-        return null;
+        return $this->structureExporter()->exportTree();
     }
 
     /**
      * Export templates to CSV format
      */
     protected function exportTemplatesToCSV() {
-        $csv = "Template Name,Template Label,Template ID,Field Name,Field Label,Field Type,Required,Collapsed,Notes,Description\n";
-        
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-            
-            foreach($template->fields as $field) {
-                $row = [
-                    $template->name,
-                    $template->label ?: $template->name,
-                    $template->id,
-                    $field->name,
-                    $field->label ?: $field->name,
-                    $field->type->className(),
-                    $field->required ? 'Yes' : 'No',
-                    $field->collapsed !== Inputfield::collapsedNo ? 'Yes' : 'No',
-                    str_replace(['"', "\n", "\r"], ['""', ' ', ''], $field->notes ?: ''),
-                    str_replace(['"', "\n", "\r"], ['""', ' ', ''], $field->description ?: '')
-                ];
-                
-                $csv .= '"' . implode('","', $row) . '"' . "\n";
-            }
+        return $this->templateExporter()->exportTemplatesToCSV();
+    }
+
+    protected function isEmptySampleValue($value) {
+        return $this->sampleSerializer()->isEmptyValue($value);
+    }
+
+    protected function serializeSampleFieldValue(Field $field, $value) {
+        return $this->sampleSerializer()->serializeFieldValue($field, $value);
+    }
+
+    protected function sampleSerializer() {
+        if($this->_sampleSerializer === null) {
+            $this->_sampleSerializer = new ContextSampleSerializer($this);
         }
-        
-        try {
-            $aiPath = $this->getContextPath();
-            file_put_contents($aiPath . 'templates.csv', $csv);
-        } catch(\Exception $e) {
-            throw new WireException("Failed to export templates CSV: " . $e->getMessage());
-        }
-        
-        return $csv;
+        return $this->_sampleSerializer;
     }
 
     /**
      * Export content samples
      */
     protected function exportSamples() {
-        $samplesPath = $this->ensureFolder($this->getContextPath() . 'samples/');
-        $allSamples = [];
-
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-            
-            $pages = $this->pages->find("template={$template->name}, limit={$this->samples_count}, sort=random");
-            
-            if(!$pages->count()) continue;
-
-            $templateSamples = [];
-            foreach($pages as $page) {
-                $pageData = [
-                    'id' => $page->id,
-                    'name' => $page->name,
-                    'title' => $page->title,
-                    'url' => $page->url,
-                    'created' => date('Y-m-d H:i:s', $page->created),
-                    'modified' => date('Y-m-d H:i:s', $page->modified),
-                    'fields' => []
-                ];
-
-                foreach($template->fields as $field) {
-                    $value = $page->get($field->name);
-                    
-                    if(empty($value) && $value !== '0' && $value !== 0) continue;
-
-                    // Page fields
-                    if($field->type instanceof FieldtypePage) {
-                        if($value instanceof Page && $value->id) {
-                            $pageData['fields'][$field->name] = [
-                                'id' => $value->id,
-                                'title' => $value->title,
-                                'url' => $value->url
-                            ];
-                        } elseif($value instanceof PageArray) {
-                            $pageData['fields'][$field->name] = [];
-                            foreach($value as $p) {
-                                $pageData['fields'][$field->name][] = [
-                                    'id' => $p->id,
-                                    'title' => $p->title,
-                                    'url' => $p->url
-                                ];
-                            }
-                        }
-                    } 
-                    // Image fields
-                    elseif($field->type instanceof FieldtypeImage) {
-                        $images = [];
-                        foreach($value as $img) {
-                            $images[] = [
-                                'url' => $img->url,
-                                'description' => $img->description,
-                                'width' => $img->width,
-                                'height' => $img->height,
-                                'filesize' => $img->filesize
-                            ];
-                        }
-                        $pageData['fields'][$field->name] = $images;
-                    } 
-                    // File fields
-                    elseif($field->type instanceof FieldtypeFile) {
-                        $files = [];
-                        foreach($value as $file) {
-                            $files[] = [
-                                'url' => $file->url,
-                                'basename' => $file->basename,
-                                'filesize' => $file->filesize,
-                                'description' => $file->description
-                            ];
-                        }
-                        $pageData['fields'][$field->name] = $files;
-                    }
-                    // Datetime fields
-                    elseif($field->type instanceof FieldtypeDatetime) {
-                        $pageData['fields'][$field->name] = $value ? date('Y-m-d H:i:s', $value) : null;
-                    } 
-                    // Table fields
-                    elseif($field->type->className() === 'FieldtypeTable') {
-                        $pageData['fields'][$field->name] = json_decode(json_encode($value), true);
-                    }
-                    // Repeater fields
-                    elseif($field->type->className() === 'FieldtypeRepeater' || 
-                            $field->type->className() === 'FieldtypeRepeaterMatrix') {
-                        $repeaterData = [];
-                        foreach($value as $repeaterItem) {
-                            $itemData = [
-                                'id' => $repeaterItem->id
-                            ];
-                            
-                            // For RepeaterMatrix add type name and label
-                            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                                $matrixTypeName = $field->type->getMatrixTypeName((int)$repeaterItem->get('repeater_matrix_type'), $field);
-                                $itemData['type'] = $matrixTypeName ?: '';
-                                if($matrixTypeName) {
-                                    try {
-                                        $itemData['type_label'] = $field->type->getMatrixTypeLabel($matrixTypeName, $field);
-                                    } catch(\Exception $e) {
-                                        $itemData['type_label'] = $matrixTypeName;
-                                    }
-                                }
-                            }
-                            
-                            // Export repeater item fields with proper types
-                            foreach($repeaterItem->fields as $repField) {
-                                $repValue = $repeaterItem->get($repField->name);
-                                if(empty($repValue) && $repValue !== '0' && $repValue !== 0) continue;
-                                
-                                // Page reference in repeater
-                                if($repField->type instanceof FieldtypePage) {
-                                    if($repValue instanceof Page && $repValue->id) {
-                                        $itemData[$repField->name] = [
-                                            'id' => $repValue->id,
-                                            'title' => $repValue->title,
-                                            'url' => $repValue->url
-                                        ];
-                                    } elseif($repValue instanceof PageArray) {
-                                        $itemData[$repField->name] = [];
-                                        foreach($repValue as $p) {
-                                            $itemData[$repField->name][] = [
-                                                'id' => $p->id,
-                                                'title' => $p->title,
-                                                'url' => $p->url
-                                            ];
-                                        }
-                                    }
-                                }
-                                // Images in repeater
-                                elseif($repField->type instanceof FieldtypeImage) {
-                                    $images = [];
-                                    foreach($repValue as $img) {
-                                        $images[] = [
-                                            'url' => $img->url,
-                                            'description' => $img->description,
-                                            'width' => $img->width,
-                                            'height' => $img->height
-                                        ];
-                                    }
-                                    $itemData[$repField->name] = $images;
-                                }
-                                // Files in repeater
-                                elseif($repField->type instanceof FieldtypeFile) {
-                                    $files = [];
-                                    foreach($repValue as $file) {
-                                        $files[] = [
-                                            'url' => $file->url,
-                                            'basename' => $file->basename,
-                                            'filesize' => $file->filesize
-                                        ];
-                                    }
-                                    $itemData[$repField->name] = $files;
-                                }
-                                // Options in repeater
-                                elseif($repField->type instanceof FieldtypeOptions) {
-                                    if($repValue instanceof SelectableOption) {
-                                        $itemData[$repField->name] = [
-                                            'id' => $repValue->id,
-                                            'value' => $repValue->value,
-                                            'title' => $repValue->title
-                                        ];
-                                    } elseif($repValue instanceof SelectableOptionArray) {
-                                        $itemData[$repField->name] = [];
-                                        foreach($repValue as $opt) {
-                                            $itemData[$repField->name][] = [
-                                                'id' => $opt->id,
-                                                'value' => $opt->value,
-                                                'title' => $opt->title
-                                            ];
-                                        }
-                                    }
-                                }
-                                // Datetime in repeater
-                                elseif($repField->type instanceof FieldtypeDatetime) {
-                                    $itemData[$repField->name] = $repValue ? date('Y-m-d H:i:s', $repValue) : null;
-                                }
-                                // Everything else as string
-                                else {
-                                    $itemData[$repField->name] = (string) $repValue;
-                                }
-                            }
-                            $repeaterData[] = $itemData;
-                        }
-                        $pageData['fields'][$field->name] = $repeaterData;
-                    }
-                    // Combo fields
-                    elseif($field->type->className() === 'FieldtypeCombo') {
-                        // Combo stores data as object
-                        $pageData['fields'][$field->name] = json_decode(json_encode($value), true);
-                    }
-                    // Other fields
-                    else {
-                        if(is_array($value)) {
-                            $pageData['fields'][$field->name] = $value;
-                        } else {
-                            $pageData['fields'][$field->name] = (string) $value;
-                        }
-                    }
-                }
-
-                $templateSamples[] = $pageData;
-            }
-
-            $allSamples[$template->name] = [
-                'template' => $template->name,
-                'label' => $template->label ?: $template->name,
-                'samples' => $templateSamples
-            ];
-            
-            $filename = $samplesPath . "{$template->name}-samples.json";
-            file_put_contents($filename, json_encode($templateSamples, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($samplesPath . "{$template->name}-samples.toon", $this->convertToToon(['samples' => $templateSamples]));
-            }
-        }
-
-        // Combined file of all samples
-        file_put_contents($samplesPath . '_all-samples.json', json_encode($allSamples, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        
-        // TOON format (if enabled)
-        if($this->export_toon_format) {
-            file_put_contents($samplesPath . '_all-samples.toon', $this->convertToToon($allSamples));
-        }
-
-        return $allSamples;
+        return $this->sampleExporter()->exportSamples();
     }
 
     /**
      * Export samples for Matrix templates
      */
     protected function exportMatrixSamples() {
-        if(!$this->export_samples) return [];
-        
-        $samplesPath = $this->ensureFolder($this->getContextPath() . 'samples/');
-        $allMatrixSamples = [];
-        
-        // Find all Matrix fields
-        $matrixFields = [];
-        foreach($this->fields as $field) {
-            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                $matrixFields[] = $field;
-            }
-        }
-        
-        if(empty($matrixFields)) return [];
-        
-        $this->log("Exporting Matrix samples for " . count($matrixFields) . " fields");
-        
-        // For each Matrix field, find pages that use it
-        foreach($matrixFields as $matrixField) {
-            // Find templates that have this Matrix field
-            $templatesWithMatrix = [];
-            foreach($this->templates as $template) {
-                if($template->hasField($matrixField)) {
-                    $templatesWithMatrix[] = $template;
-                }
-            }
-            
-            if(empty($templatesWithMatrix)) continue;
-            
-            // Find pages with this template that have Matrix data
-            foreach($templatesWithMatrix as $template) {
-                $pages = $this->pages->find("template={$template->name}, {$matrixField->name}.count>0, limit={$this->samples_count}, sort=random");
-                
-                if(!$pages->count()) continue;
-                
-                foreach($pages as $page) {
-                    $matrixItems = $page->get($matrixField->name);
-                    if(!$matrixItems || !$matrixItems->count()) continue;
-                    
-                    foreach($matrixItems as $matrixItem) {
-                        // Get matrix type name via official API
-                        $matrixTypeInt = (int)$matrixItem->get('repeater_matrix_type');
-                        $matrixTypeName = $matrixField->type->getMatrixTypeName($matrixTypeInt, $matrixField);
-                        if(!$matrixTypeName) continue; // skip items with unknown type
-                        
-                        $matrixTypeLabel = '';
-                        try {
-                            $matrixTypeLabel = $matrixField->type->getMatrixTypeLabel($matrixTypeName, $matrixField);
-                        } catch(\Exception $e) {
-                            $matrixTypeLabel = $matrixTypeName;
-                        }
-                        
-                        if(!isset($allMatrixSamples[$matrixTypeName])) {
-                            $allMatrixSamples[$matrixTypeName] = [
-                                'type_name'         => $matrixTypeName,
-                                'type_label'        => $matrixTypeLabel,
-                                'parent_field'      => $matrixField->name,
-                                'parent_field_label' => $matrixField->label,
-                                'samples' => []
-                            ];
-                        }
-                        
-                        // Limit samples per matrix type
-                        if(count($allMatrixSamples[$matrixTypeName]['samples']) >= $this->samples_count) {
-                            continue;
-                        }
-                        
-                        $itemData = [
-                            'id'         => $matrixItem->id,
-                            'type'       => $matrixTypeName,
-                            'type_label' => $matrixTypeLabel,
-                            'fields' => []
-                        ];
-                        
-                        // Export all fields from this matrix item
-                        foreach($matrixItem->template->fields as $itemField) {
-                            $value = $matrixItem->get($itemField->name);
-                            
-                            if(empty($value) && $value !== '0' && $value !== 0) continue;
-                            
-                            // Handle different field types (same as in exportSamples)
-                            if($itemField->type instanceof FieldtypePage) {
-                                if($value instanceof Page && $value->id) {
-                                    $itemData['fields'][$itemField->name] = [
-                                        'id' => $value->id,
-                                        'title' => $value->title,
-                                        'url' => $value->url
-                                    ];
-                                } elseif($value instanceof PageArray) {
-                                    $itemData['fields'][$itemField->name] = [];
-                                    foreach($value as $p) {
-                                        $itemData['fields'][$itemField->name][] = [
-                                            'id' => $p->id,
-                                            'title' => $p->title,
-                                            'url' => $p->url
-                                        ];
-                                    }
-                                }
-                            }
-                            elseif($itemField->type instanceof FieldtypeImage) {
-                                $images = [];
-                                foreach($value as $img) {
-                                    $images[] = [
-                                        'url' => $img->url,
-                                        'description' => $img->description,
-                                        'width' => $img->width,
-                                        'height' => $img->height
-                                    ];
-                                }
-                                $itemData['fields'][$itemField->name] = $images;
-                            }
-                            elseif($itemField->type instanceof FieldtypeFile) {
-                                $files = [];
-                                foreach($value as $file) {
-                                    $files[] = [
-                                        'url' => $file->url,
-                                        'basename' => $file->basename,
-                                        'filesize' => $file->filesize
-                                    ];
-                                }
-                                $itemData['fields'][$itemField->name] = $files;
-                            }
-                            elseif($itemField->type instanceof FieldtypeDatetime) {
-                                $itemData['fields'][$itemField->name] = $value ? date('Y-m-d H:i:s', $value) : null;
-                            }
-                            elseif($itemField->type->className() === 'FieldtypeTable') {
-                                $itemData['fields'][$itemField->name] = json_decode(json_encode($value), true);
-                            }
-                            elseif($itemField->type->className() === 'FieldtypeCombo') {
-                                $itemData['fields'][$itemField->name] = json_decode(json_encode($value), true);
-                            }
-                            elseif($itemField->type instanceof FieldtypeOptions) {
-                                if($value instanceof SelectableOption) {
-                                    $itemData['fields'][$itemField->name] = [
-                                        'id' => $value->id,
-                                        'value' => $value->value,
-                                        'title' => $value->title
-                                    ];
-                                } elseif($value instanceof SelectableOptionArray) {
-                                    $itemData['fields'][$itemField->name] = [];
-                                    foreach($value as $opt) {
-                                        $itemData['fields'][$itemField->name][] = [
-                                            'id' => $opt->id,
-                                            'value' => $opt->value,
-                                            'title' => $opt->title
-                                        ];
-                                    }
-                                }
-                            }
-                            else {
-                                if(is_array($value)) {
-                                    $itemData['fields'][$itemField->name] = $value;
-                                } else {
-                                    $itemData['fields'][$itemField->name] = (string) $value;
-                                }
-                            }
-                        }
-                        
-                        $allMatrixSamples[$matrixTypeName]['samples'][] = $itemData;
-                    }
-                }
-            }
-        }
-        
-        // Write individual Matrix template samples
-        foreach($allMatrixSamples as $matrixTypeName => $matrixSampleData) {
-            $filename = $samplesPath . "{$matrixTypeName}-samples.json";
-            file_put_contents($filename, json_encode($matrixSampleData['samples'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($samplesPath . "{$matrixTypeName}-samples.toon", $this->convertToToon(['samples' => $matrixSampleData['samples']]));
-            }
-            
-            $this->log("Created samples for Matrix template: {$matrixTypeName} (" . count($matrixSampleData['samples']) . " samples)");
-        }
-        
-        return $allMatrixSamples;
+        return $this->sampleExporter()->exportMatrixSamples();
     }
 
     /**
      * Generate JSON Schema for API
      */
     protected function exportApiDocs() {
-        $apiPath = $this->ensureFolder($this->getContextPath() . 'api/');
-        $schemasPath = $this->ensureFolder($apiPath . 'schemas/');
-        $examplesPath = $this->ensureFolder($apiPath . 'examples/');
-        
-        $endpoints = [];
-        $allSchemas = [];
-
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-
-            // JSON Schema for template
-            $schema = [
-                '$schema' => 'http://json-schema.org/draft-07/schema#',
-                'title' => $template->label ?: $template->name,
-                'type' => 'object',
-                'properties' => []
-            ];
-
-            $required = [];
-
-            foreach($template->fields as $field) {
-                $property = [
-                    'type' => $this->getJsonSchemaType($field),
-                    'description' => $field->label
-                ];
-
-                if($field->notes) {
-                    $property['notes'] = $field->notes;
-                }
-
-                // Additional properties for different types
-                if($field->type instanceof FieldtypePage) {
-                    $property['$ref'] = '#/definitions/PageReference';
-                } elseif($field->type instanceof FieldtypeImage) {
-                    $property['type'] = 'array';
-                    $property['items'] = ['$ref' => '#/definitions/Image'];
-                } 
-                // Repeater fields
-                elseif($field->type->className() === 'FieldtypeRepeater') {
-                    $property['type'] = 'array';
-                    $property['description'] .= ' (Repeater field)';
-                    $repeaterTemplate = $this->templates->get("repeater_" . $field->name);
-                    if($repeaterTemplate) {
-                        $property['items'] = ['type' => 'object', 'properties' => []];
-                        foreach($repeaterTemplate->fields as $repField) {
-                            $property['items']['properties'][$repField->name] = [
-                                'type' => 'string', 'description' => $repField->label
-                            ];
-                        }
-                    }
-                }
-                // ProFields: Table — JSON Schema array of row objects
-                elseif($field->type->className() === 'FieldtypeTable') {
-                    $property['type'] = 'array';
-                    $property['description'] .= ' (Table field)';
-                    $cols = $this->getTableColumns($field);
-                    if(!empty($cols)) {
-                        $property['items'] = ['type' => 'object', 'properties' => []];
-                        foreach($cols as $col) {
-                            $property['items']['properties'][$col['name']] = [
-                                'type' => 'string', 'description' => $col['label']
-                            ];
-                        }
-                    }
-                }
-                // ProFields: RepeaterMatrix — JSON Schema oneOf per type
-                elseif($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                    $property['type'] = 'array';
-                    $property['description'] .= ' (RepeaterMatrix field)';
-                    $property['items'] = ['oneOf' => []];
-                    foreach($this->getMatrixTypesData($field) as $typeInfo) {
-                        $matrixSchema = [
-                            'type' => 'object',
-                            'properties' => [
-                                'type' => [
-                                    'type' => 'string',
-                                    'const' => $typeInfo['name'],
-                                    'description' => $typeInfo['label']
-                                ]
-                            ],
-                            'required' => ['type']
-                        ];
-                        foreach($typeInfo['fields'] as $mf) {
-                            $matrixSchema['properties'][$mf['name']] = [
-                                'type' => 'string', 'description' => $mf['label'] ?? $mf['name']
-                            ];
-                        }
-                        $property['items']['oneOf'][] = $matrixSchema;
-                    }
-                }
-                // ProFields: Combo — JSON Schema object with subfield properties
-                elseif($field->type->className() === 'FieldtypeCombo') {
-                    $property['type'] = 'object';
-                    $property['description'] .= ' (Combo field)';
-                    $subs = $this->getComboSubfields($field);
-                    if(!empty($subs)) {
-                        $property['properties'] = [];
-                        foreach($subs as $sub) {
-                            $property['properties'][$sub['name']] = [
-                                'type' => 'string', 'description' => $sub['label']
-                            ];
-                        }
-                    }
-                }
-
-                $schema['properties'][$field->name] = $property;
-
-                if($field->required) {
-                    $required[] = $field->name;
-                }
-            }
-
-            if(!empty($required)) {
-                $schema['required'] = $required;
-            }
-
-            // Definitions
-            $schema['definitions'] = [
-                'PageReference' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'id' => ['type' => 'integer'],
-                        'title' => ['type' => 'string'],
-                        'url' => ['type' => 'string']
-                    ]
-                ],
-                'Image' => [
-                    'type' => 'object',
-                    'properties' => [
-                        'url' => ['type' => 'string'],
-                        'width' => ['type' => 'integer'],
-                        'height' => ['type' => 'integer'],
-                        'description' => ['type' => 'string']
-                    ]
-                ]
-            ];
-
-            $allSchemas[$template->name] = $schema;
-            file_put_contents($schemasPath . "{$template->name}-schema.json", json_encode($schema, JSON_PRETTY_PRINT));
-
-            // API Endpoint
-            $samplePage = $this->pages->get("template={$template->name}");
-            if($samplePage->id) {
-                $endpoints[] = [
-                    'path' => "/api/{$template->name}/{id}",
-                    'method' => 'GET',
-                    'description' => "Get single {$template->label}",
-                    'response_schema' => "{$template->name}-schema.json"
-                ];
-
-                if($samplePage->numChildren > 0 || $this->pages->count("template={$template->name}") > 1) {
-                    $endpoints[] = [
-                        'path' => "/api/{$template->name}/",
-                        'method' => 'GET',
-                        'description' => "List all {$template->label}",
-                        'query_params' => ['limit', 'page', 'sort'],
-                        'response_schema' => "{$template->name}-schema.json (array)"
-                    ];
-                }
-            }
-        }
-
-        file_put_contents($apiPath . 'endpoints.json', json_encode($endpoints, JSON_PRETTY_PRINT));
-        file_put_contents($apiPath . 'all-schemas.json', json_encode($allSchemas, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return ['endpoints' => $endpoints, 'schemas' => $allSchemas];
+        return $this->apiExporter()->exportApiDocs();
     }
 
     /**
      * Determine JSON Schema type from ProcessWire field
      */
     protected function getJsonSchemaType($field) {
-        $className = $field->type->className();
-        
-        $typeMap = [
-            'FieldtypeText' => 'string',
-            'FieldtypeTextarea' => 'string',
-            'FieldtypePageTitle' => 'string',
-            'FieldtypeInteger' => 'integer',
-            'FieldtypeFloat' => 'number',
-            'FieldtypeCheckbox' => 'boolean',
-            'FieldtypeDatetime' => 'string',
-            'FieldtypeURL' => 'string',
-            'FieldtypeEmail' => 'string',
-            'FieldtypePage' => 'object',
-            'FieldtypeImage' => 'array',
-            'FieldtypeFile' => 'array',
-        ];
+        return $this->apiExporter()->getJsonSchemaType($field);
+    }
 
-        return $typeMap[$className] ?? 'string';
+    protected function buildJsonSchemaProperty(Field $field) {
+        return $this->apiExporter()->buildJsonSchemaProperty($field);
+    }
+
+    protected function getJsonSchemaTypeFromName($typeName) {
+        return $this->apiExporter()->getJsonSchemaTypeFromName($typeName);
     }
 
     /**
      * Export detailed custom field definitions
      */
     protected function exportFieldDefinitions() {
-        $metadataPath = $this->ensureFolder($this->getContextPath() . 'metadata/');
-        $definitions = [
-            'custom_fields' => [],
-            'field_types' => []
-        ];
-
-        foreach($this->fields as $field) {
-            $className = $field->type->className();
-
-            // Collect field type information
-            if(!isset($definitions['field_types'][$className])) {
-                // Some fieldtypes use .info.php instead of getModuleInfo()
-                $label = $className;
-                if(method_exists($field->type, 'getModuleInfo')) {
-                    $moduleInfo = $field->type->getModuleInfo();
-                    $label = $moduleInfo['title'] ?? $className;
-                }
-                
-                $definitions['field_types'][$className] = [
-                    'class' => $className,
-                    'label' => $label,
-                    'usage_count' => 0,
-                    'examples' => []
-                ];
-            }
-
-            $definitions['field_types'][$className]['usage_count']++;
-            $definitions['field_types'][$className]['examples'][] = $field->name;
-
-            // Detailed definitions for complex fields
-            // ProFields: Table
-            if($className === 'FieldtypeTable') {
-                $cols = $this->getTableColumns($field);
-                $colsList = [];
-                foreach($cols as $col) {
-                    $colsList[] = [
-                        'name'    => $col['name'],
-                        'label'   => $col['label'],
-                        'type'    => $col['type'],
-                        'purpose' => $col['label'],
-                    ];
-                }
-                $definitions['custom_fields'][$field->name] = [
-                    'name'          => $field->name,
-                    'label'         => $field->label,
-                    'type'          => 'Table',
-                    'columns'       => $colsList,
-                    'usage_example' => $field->notes ?: "Table field with structured data",
-                ];
-            }
-
-            if($className === 'FieldtypeRepeater') {
-                $repeaterTemplate = $this->templates->get("repeater_" . $field->name);
-                if($repeaterTemplate) {
-                    $definitions['custom_fields'][$field->name] = [
-                        'name' => $field->name,
-                        'label' => $field->label,
-                        'type' => 'Repeater',
-                        'fields' => [],
-                        'usage_example' => $field->notes ?: "Repeatable set of fields"
-                    ];
-
-                    foreach($repeaterTemplate->fields as $repField) {
-                        $definitions['custom_fields'][$field->name]['fields'][] = [
-                            'name' => $repField->name,
-                            'type' => $repField->type->className(),
-                            'label' => $repField->label,
-                            'purpose' => $repField->description ?: $repField->label
-                        ];
-                    }
-                }
-            }
-
-            // ProFields: RepeaterMatrix
-            if($className === 'FieldtypeRepeaterMatrix') {
-                $typesData = $this->getMatrixTypesData($field);
-                $matrixTypesList = [];
-                foreach($typesData as $typeInfo) {
-                    $mfList = [];
-                    foreach($typeInfo['fields'] as $mf) {
-                        $mfList[] = [
-                            'name'    => $mf['name'],
-                            'type'    => $mf['type'],
-                            'label'   => $mf['label'] ?? $mf['name'],
-                            'purpose' => (!empty($mf['description']) ? $mf['description'] : ($mf['label'] ?? $mf['name'])),
-                        ];
-                    }
-                    $matrixTypesList[] = [
-                        'name'   => $typeInfo['name'],
-                        'label'  => $typeInfo['label'],
-                        'head'   => $typeInfo['head'],
-                        'fields' => $mfList,
-                    ];
-                }
-                $definitions['custom_fields'][$field->name] = [
-                    'name'          => $field->name,
-                    'label'         => $field->label,
-                    'type'          => 'RepeaterMatrix',
-                    'matrix_types'  => $matrixTypesList,
-                    'usage_example' => $field->notes ?: "Matrix of different repeater types",
-                ];
-            }
-
-            // ProFields: Combo
-            if($className === 'FieldtypeCombo') {
-                $subsData = $this->getComboSubfields($field);
-                $subsList = [];
-                foreach($subsData as $sub) {
-                    $subsList[] = [
-                        'name'    => $sub['name'],
-                        'type'    => $sub['type'],
-                        'label'   => $sub['label'],
-                        'purpose' => (!empty($sub['description']) ? $sub['description'] : $sub['label']),
-                    ];
-                }
-                $definitions['custom_fields'][$field->name] = [
-                    'name'          => $field->name,
-                    'label'         => $field->label,
-                    'type'          => 'Combo',
-                    'subfields'     => $subsList,
-                    'usage_example' => $field->notes ?: "Combined set of subfields",
-                ];
-            }
-        }
-
-        file_put_contents($metadataPath . 'field-definitions.json', json_encode($definitions, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return $definitions;
+        return $this->metadataExporter()->exportFieldDefinitions();
     }
 
     /**
      * Export URL routing
      */
     protected function exportRoutes() {
-        $metadataPath = $this->ensureFolder($this->getContextPath() . 'metadata/');
-        $routes = [];
-
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-
-            $samplePage = $this->pages->get("template={$template->name}");
-            if(!$samplePage->id) continue;
-
-            $route = [
-                'template' => $template->name,
-                'label' => $template->label ?: $template->name,
-                'url_pattern' => $samplePage->url,
-                'has_children' => $samplePage->numChildren > 0,
-                'allow_page_num' => $template->allowPageNum ? true : false,
-                'url_segments' => $template->urlSegments ? true : false
-            ];
-
-            if($samplePage->numChildren > 0) {
-                $firstChild = $samplePage->child();
-                if($firstChild->id) {
-                    $route['type'] = 'listing';
-                    $route['children_template'] = $firstChild->template->name;
-                    $route['children_url_pattern'] = $firstChild->url;
-                }
-            } else {
-                $route['type'] = $samplePage->parent->id === 1 ? 'root' : 'detail';
-            }
-
-            $routes[] = $route;
-        }
-
-        file_put_contents($metadataPath . 'routes.json', json_encode($routes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return $routes;
+        return $this->metadataExporter()->exportRoutes();
     }
 
     /**
      * Export performance metrics
      */
     protected function exportPerformance() {
-        $metadataPath = $this->ensureFolder($this->getContextPath() . 'metadata/');
-
-        // Count pages by template
-        $templateCounts = [];
-        $totalPages = 0;
-        $totalNonSystemTemplates = 0;
-        
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-            $totalNonSystemTemplates++;
-            
-            $count = $this->pages->count("template={$template->name}");
-            if($count > 0) {
-                $templateCounts[] = [
-                    'template' => $template->name,
-                    'label' => $template->label ?: $template->name,
-                    'count' => $count
-                ];
-                $totalPages += $count;
-            }
-        }
-
-        // Sort by count
-        usort($templateCounts, function($a, $b) {
-            return $b['count'] - $a['count'];
-        });
-
-        // Database size
-        $dbSize = 'N/A';
-        try {
-            $result = $this->database->query("SELECT 
-                ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) AS size_mb 
-                FROM information_schema.TABLES 
-                WHERE table_schema = '{$this->config->dbName}'")->fetch();
-            $dbSize = $result['size_mb'] . ' MB';
-        } catch(\Exception $e) {
-            // Ignore
-        }
-
-        $performance = [
-            'total_pages' => $totalPages,
-            'total_templates' => $totalNonSystemTemplates,
-            'largest_templates' => array_slice($templateCounts, 0, 10),
-            'database_size' => $dbSize,
-            'processwire_version' => $this->config->version,
-            'php_version' => phpversion(),
-            'memory_limit' => ini_get('memory_limit'),
-            'max_execution_time' => ini_get('max_execution_time'),
-            'limits' => [
-                'recommended_page_limit' => 1000,
-                'max_file_upload' => ini_get('upload_max_filesize'),
-                'post_max_size' => ini_get('post_max_size')
-            ],
-            'generated_at' => date('Y-m-d H:i:s')
-        ];
-
-        file_put_contents($metadataPath . 'performance.json', json_encode($performance, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-
-        return $performance;
+        return $this->metadataExporter()->exportPerformance();
     }
 
     /**
      * Create code library
      */
     protected function createSnippets() {
-        $snippetsPath = $this->ensureFolder($this->getContextPath() . 'snippets/');
-        
-        // Load snippets library
-        require_once(__DIR__ . '/ContextSnippets.php');
-        
-        // Get site type from settings
-        $siteType = $this->site_type ?: 'generic';
-        
-        // Get real templates for examples
-        $templates = [];
-        foreach($this->templates as $t) {
-            if($t->flags & Template::flagSystem) continue;
-            if(in_array($t->name, ['home', 'basic-page', 'admin', 'sitemap'])) continue;
-            $templates[] = $t->name;
-        }
-        
-        // Generate snippets using external class
-        $selectors = ContextSnippets::getSelectorsSnippet($siteType, $templates);
-        file_put_contents($snippetsPath . 'selectors.php', $selectors);
-        
-        $helpers = ContextSnippets::getHelpersSnippet();
-        file_put_contents($snippetsPath . 'helpers.php', $helpers);
-        
-        $apiExamples = ContextSnippets::getApiExamplesSnippet($siteType, $templates);
-        file_put_contents($snippetsPath . 'api-examples.php', $apiExamples);
+        $this->promptExporter()->createSnippets();
     }
-    
+
     /**
      * Generate selectors snippet based on site type setting
      */
     protected function createPrompts() {
-        $promptsPath = $this->ensureFolder($this->getContextPath() . 'prompts/');
-
-        // Main context
-        $projectContext = $this->generateProjectContext();
-        file_put_contents($promptsPath . 'project-context.md', $projectContext);
-
-        // Prompt for template creation
-        $createTemplate = $this->generateCreateTemplatePrompt();
-        file_put_contents($promptsPath . 'create-template.md', $createTemplate);
-
-        // Prompt for API creation
-        $createApi = $this->generateCreateApiPrompt();
-        file_put_contents($promptsPath . 'create-api.md', $createApi);
-
-        // Debugging prompt
-        $debugPrompt = $this->generateDebugPrompt();
-        file_put_contents($promptsPath . 'debug-issue.md', $debugPrompt);
-
-        // Project summary template for session continuity
-        // Only create if doesn't exist - preserve user's session history
-        if(!file_exists($promptsPath . 'project-summary.md')) {
-            $projectSummary = $this->generateProjectSummaryTemplate();
-            file_put_contents($promptsPath . 'project-summary.md', $projectSummary);
-        }
-
-        return true;
+        return $this->promptExporter()->createPrompts();
     }
 
     protected function generateProjectContext() {
-        $homePage = $this->pages->get('/');
-        
-        // Get dynamic export path (removes trailing slash for consistency)
-        $contextPath = rtrim($this->getContextPath(), '/');
-        
-        // Detect frontend stack
-        $stack = $this->detectFrontendStack();
-        
-        // Get route map
-        $routes = $this->getRouteMap();
-        
-        // Get access map
-        $access = $this->getAccessMap();
-        
-        // Count key metrics
-        $stats = [];
-        foreach($this->templates as $template) {
-            if($template->flags & Template::flagSystem) continue;
-            $count = $this->pages->count("template={$template->name}");
-            if($count > 100) {
-                $stats[] = "- **{$template->label}**: {$count} " . strtolower($template->label ?: $template->name);
-            }
-        }
-
-        $phpVersion = phpversion();
-        
-        $toonInfo = '';
-        if($this->export_toon_format) {
-            $toonInfo = <<<TOON
-
-## 📊 Export Formats
-
-This site's context is available in two formats:
-
-**TOON Format (.toon files) - RECOMMENDED FOR AI**
-- Token-Oriented Object Notation
-- 30-60% fewer tokens than JSON
-- Optimized for AI assistants (Claude, ChatGPT, etc.)
-- Same data, significantly smaller size
-- Example: `templates.toon`, `structure.toon`, `samples/*.toon`
-
-**JSON Format (.json files) - For Development**
-- Standard JSON for APIs, tools, IDEs
-- Example: `templates.json`, `structure.json`
-
-**💡 Use .toon files for AI interactions to save tokens and reduce API costs!**
-
-TOON;
-        }
-
-        $md = <<<MD
-# SYSTEM PROMPT: ProcessWire Expert Mode
-
-You are an expert developer for this specific ProcessWire instance.
-{$toonInfo}
-
-## Project Overview
-**Site**: {$homePage->title}
-**URL**: {$this->config->httpHost}
-**ProcessWire Version**: {$this->config->version}
-**PHP Version**: {$phpVersion}
-
-## 🎨 Frontend & Design
-**Tech Stack**: {$stack}
-
-MD;
-
-        // Add routes if any
-        if(!empty($routes)) {
-            $md .= "\n## 🛣 Route Map (URL Segments)\n";
-            foreach($routes as $name => $info) {
-                $md .= "- **Template '{$name}':** Allows {$info['max_segments']} segments ({$info['segments_allowed']})\n";
-            }
-        }
-
-        // Add access control
-        if(!empty($access)) {
-            $md .= "\n## 🔐 Access Control (Roles & Permissions)\n";
-            foreach($access as $role => $info) {
-                $perms = implode(', ', $info['permissions']);
-                $md .= "- **Role '{$role}':** [{$perms}]\n";
-            }
-        }
-
-        $md .= "\n## Key Statistics\n";
-        $md .= implode("\n", $stats);
-
-        $md .= <<<MD
-
-
-## Technical Stack
-- **CMS**: ProcessWire {$this->config->version}
-- **PHP**: {$phpVersion}
-- **Database**: MySQL
-- **Admin**: {$this->config->urls->admin}
-
-## Content Organization
-This site uses ProcessWire's flexible template system. See `{$contextPath}/structure.txt` for the complete page tree.
-
-## Important Patterns
-
-### Getting Pages
-```php
-// Single page
-\$product = \$pages->get("template=product, name=product-slug");
-
-// Multiple pages
-\$products = \$pages->find("template=product, limit=20");
-
-// With relationships
-\$products = \$pages->find("template=product, brand=\$brandId");
-```
-
-### Working with Fields
-```php
-// Text fields
-echo \$page->title;
-echo \$page->summary;
-
-// Page references
-\$brand = \$page->brand; // Returns Page object
-echo \$brand->title;
-
-// Images
-foreach(\$page->images as \$img) {
-    echo "<img src='{\$img->url}' alt='{\$img->description}'>";
-}
-```
-
-MD;
-
-        $md .= <<<MD
-
-## Common Tasks
-
-1. **Listing Pages**: Use `\$pages->find()` with appropriate selectors
-2. **Creating Pages**: Instantiate `new Page()`, set template and parent
-3. **Search**: Use `title|summary%=\$query` for text search
-4. **Pagination**: Use `limit` and `start` in selectors
-
-## File References
-
-**Core Files (TOON format recommended for AI):**
-- **Structure**: 
-  - `{$contextPath}/structure.toon` - Complete page tree (TOON - 43% fewer tokens)
-  - `{$contextPath}/structure.json` - Complete page tree (JSON)
-  - `{$contextPath}/structure.txt` - ASCII visualization
-- **Templates**: 
-  - `{$contextPath}/templates.toon` - All templates with fields (TOON - 50% fewer tokens)
-  - `{$contextPath}/templates.json` - All templates with fields (JSON)
-- **Samples**: 
-  - `{$contextPath}/samples/*.toon` - Real content examples (TOON - 46% fewer tokens)
-  - `{$contextPath}/samples/*.json` - Real content examples (JSON)
-- **Snippets**: `{$contextPath}/snippets/` - Code examples
-- **API Docs**: `{$contextPath}/api/` - API schemas and endpoints
-
-**💡 Pro Tip**: Always prefer .toon files over .json when available - they contain the same data but use significantly fewer tokens!
-
-## Notes
-- Always sanitize user input using `\$sanitizer`
-- Use ProcessWire's built-in URL functions
-- Implement caching for heavy queries
-- Keep selectors efficient
-
-For detailed information, explore the files in `{$contextPath}/` directory.
-
-MD;
-
-        // Add custom AI instructions if set
-        if($this->custom_ai_instructions) {
-            $md .= "\n## 📝 Custom Project Instructions\n\n";
-            $md .= $this->custom_ai_instructions . "\n";
-        }
-
-        
-        return $md;
+        return $this->promptTemplates()->generateProjectContext();
     }
     
     /**
      * Create IDE integration files
      */
     protected function createIntegrationFiles() {
-        if(!$this->export_integrations) return;
-        
-        $rootDir = $this->config->paths->root;
-        
-        // Process .cursorrules
-        $this->updateCursorRules($rootDir);
-        
-        // Process .claudecode.json
-        $this->updateClaudeCode($rootDir);
+        $this->integrationExporter()->createIntegrationFiles();
     }
     
     /**
      * Update .cursorrules file (add paths if not exists)
      */
     protected function updateCursorRules($rootDir) {
-        $cursorRulesPath = $rootDir . '.cursorrules';
-        
-        $contextPath = 'site/assets/context/';
-        $promptsPath = 'site/assets/context/prompts/project-context.md';
-        
-        $newLines = [
-            "# ProcessWire Context",
-            "Root: {$rootDir}",
-            "Context: {$contextPath}",
-            "Follow rules in {$promptsPath}"
-        ];
-        
-        if(file_exists($cursorRulesPath)) {
-            // File exists - check if our paths are already there
-            $content = file_get_contents($cursorRulesPath);
-            $lines = explode("\n", $content);
-            
-            $needsUpdate = false;
-            $linesToAdd = [];
-            
-            foreach($newLines as $newLine) {
-                $found = false;
-                foreach($lines as $line) {
-                    // Check if this path/rule already exists
-                    if(stripos($line, $contextPath) !== false || 
-                       stripos($line, $promptsPath) !== false ||
-                       stripos($line, 'ProcessWire Context') !== false) {
-                        $found = true;
-                        break;
-                    }
-                }
-                
-                if(!$found) {
-                    $linesToAdd[] = $newLine;
-                    $needsUpdate = true;
-                }
-            }
-            
-            if($needsUpdate) {
-                // Add missing lines
-                $content .= "\n\n" . implode("\n", $linesToAdd);
-                file_put_contents($cursorRulesPath, $content);
-            }
-            // else - all paths already exist, skip
-            
-        } else {
-            // File doesn't exist - create new
-            file_put_contents($cursorRulesPath, implode("\n", $newLines));
-        }
+        $this->integrationExporter()->updateCursorRules($rootDir);
     }
     
     /**
      * Update .claudecode.json file (add context paths if not exists)
      */
     protected function updateClaudeCode($rootDir) {
-        $claudeCodePath = $rootDir . '.claudecode.json';
-        
-        $contextPaths = [
-            "site/assets/context/templates.json",
-            "site/assets/context/prompts/project-context.md"
-        ];
-        
-        if(file_exists($claudeCodePath)) {
-            // File exists - read and update
-            $content = file_get_contents($claudeCodePath);
-            $config = json_decode($content, true);
-            
-            if(!$config) {
-                // Invalid JSON - create new structure
-                $config = [
-                    "name" => "PW-" . $this->config->httpHost,
-                    "context" => []
-                ];
-            }
-            
-            // Ensure context array exists
-            if(!isset($config['context'])) {
-                $config['context'] = [];
-            }
-            
-            // Add missing paths
-            $needsUpdate = false;
-            foreach($contextPaths as $path) {
-                if(!in_array($path, $config['context'])) {
-                    $config['context'][] = $path;
-                    $needsUpdate = true;
-                }
-            }
-            
-            if($needsUpdate) {
-                file_put_contents($claudeCodePath, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            }
-            // else - all paths already exist, skip
-            
-        } else {
-            // File doesn't exist - create new
-            $config = [
-                "name" => "PW-" . $this->config->httpHost,
-                "context" => $contextPaths
-            ];
-            file_put_contents($claudeCodePath, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        }
+        $this->integrationExporter()->updateClaudeCode($rootDir);
     }
 
     protected function generateCreateTemplatePrompt() {
-        $contextPath = rtrim($this->getContextPath(), '/');
-        
-        return <<<MD
-# Create ProcessWire Template - AI Prompt
-
-I need help creating a new ProcessWire template.
-
-## Template Details
-
-**Template Name**: [e.g., "winery", "event", "award"]
-
-**Purpose**: [Describe what this template is for]
-
-**Label**: [Human-readable label]
-
-## Fields Required
-
-### Basic Fields
-- title (FieldtypePageTitle) - required
-- [Add other fields...]
-
-### Custom Fields
-List any special fields needed:
-1. [field_name] - [field_type] - [description]
-2. ...
-
-## Relationships
-- Parent template: [which template contains these pages?]
-- Child templates: [can this have children? which templates?]
-- Page references: [connects to which other templates?]
-
-## URL Structure
-- Example URL: `/section/page-name/`
-- Parent path: [e.g., /events/]
-
-## Example Data
-Provide 1-2 examples of pages that would use this template.
-
----
-
-## Files to Reference
-When generating the template, review:
-- `{$contextPath}/templates.json` - existing field patterns
-- `{$contextPath}/structure.txt` - site structure
-- `{$contextPath}/snippets/selectors.php` - query examples
-
-## Expected Output
-Please generate:
-1. Template file code (`templates/template-name.php`)
-2. Field creation code or instructions
-3. Example page creation code
-4. Common selectors for querying these pages
-MD;
+        return $this->promptTemplates()->generateCreateTemplatePrompt();
     }
 
     protected function generateCreateApiPrompt() {
-        $contextPath = rtrim($this->getContextPath(), '/');
-        
-        return <<<MD
-# Create ProcessWire API Endpoint - AI Prompt
-
-I need to create a REST API endpoint for ProcessWire.
-
-## API Endpoint Details
-
-**Endpoint**: `/api/[resource]/[action]`
-
-**Method**: GET / POST / PUT / DELETE
-
-**Purpose**: [What this endpoint does]
-
-## Request
-
-### URL Parameters
-- [param1]: [description]
-- [param2]: [description]
-
-### Query Parameters
-- limit: [number of results]
-- page: [page number]
-- [custom params...]
-
-### POST Body (if applicable)
-```json
-{
-  "field1": "value",
-  "field2": "value"
-}
-```
-
-## Response
-
-### Success Response (200)
-```json
-{
-  "success": true,
-  "data": {}
-}
-```
-
-### Error Response (4xx/5xx)
-```json
-{
-  "error": "Error message"
-}
-```
-
-## Authentication
-- Required: Yes / No
-- Method: [Session, API Key, etc.]
-
-## Example Use Cases
-1. [Use case 1]
-2. [Use case 2]
-
----
-
-## Files to Reference
-- `{$contextPath}/api/endpoints.json` - existing API endpoints
-- `{$contextPath}/api/schemas/` - data schemas
-- `{$contextPath}/snippets/api-examples.php` - code patterns
-
-## Expected Output
-Please generate:
-1. Complete PHP endpoint code
-2. Example request/response
-3. Error handling
-4. Authentication checks (if needed)
-MD;
+        return $this->promptTemplates()->generateCreateApiPrompt();
     }
 
     protected function generateDebugPrompt() {
-        return <<<'MD'
-# Debug ProcessWire Issue - AI Prompt
-
-I'm experiencing an issue with my ProcessWire site.
-
-## Problem Description
-[Describe the issue in detail]
-
-## What I'm Trying to Do
-[What are you trying to accomplish?]
-
-## Current Code
-```php
-// Paste your code here
-```
-
-## Error Messages
-```
-[Paste any error messages here]
-```
-
-## Expected Behavior
-[What should happen?]
-
-## Actual Behavior
-[What is actually happening?]
-
-## Environment
-- ProcessWire Version: [check `/site/assets/context/config.json`]
-- PHP Version: [check `/site/assets/context/performance.json`]
-- Template: [which template is affected?]
-
-## What I've Tried
-1. [Thing 1]
-2. [Thing 2]
-
----
-
-## Files to Reference
-- `/site/assets/context/templates.json` - template/field structure
-- `/site/assets/context/snippets/` - code examples
-- `/site/assets/context/structure.txt` - page tree
-
-## Expected Help
-Please provide:
-1. Explanation of the issue
-2. Fixed code
-3. Alternative approaches
-4. Best practices to avoid this in future
-MD;
+        return $this->promptTemplates()->generateDebugPrompt();
     }
 
     /**
      * Export configuration
      */
     protected function exportConfig() {
-        return [
-            'site_name' => $this->config->httpHost,
-            'admin_url' => $this->config->urls->admin,
-            'pw_version' => $this->config->version,
-            'php_version' => phpversion(),
-            'timezone' => $this->config->timezone,
-            'debug_mode' => $this->config->debug,
-            'charset' => $this->config->dbCharset,
-            'exported_at' => date('Y-m-d H:i:s'),
-            'export_version' => self::getModuleInfo()['version']
-        ];
+        return $this->systemExporter()->exportConfig();
     }
 
     /**
      * Export modules
      */
     protected function exportModules() {
-        $modules = [];
-        
-        foreach($this->modules as $moduleName) {
-            try {
-                // Get module info from ProcessWire
-                $info = $this->modules->getModuleInfo($moduleName, ['verbose' => true]);
-                
-                // If summary or author is empty, try to read from file
-                if(empty($info['summary']) || empty($info['author'])) {
-                    $moduleFile = $this->modules->getModuleFile($moduleName);
-                    if($moduleFile && file_exists($moduleFile)) {
-                        $fileContent = file_get_contents($moduleFile);
-                        
-                        // Extract summary
-                        if(empty($info['summary']) && preg_match('/[\'"]summary[\'"]\s*=>\s*[\'"]([^\'"]+)[\'"]/i', $fileContent, $summaryMatch)) {
-                            $info['summary'] = $summaryMatch[1];
-                        }
-                        
-                        // Extract author
-                        if(empty($info['author']) && preg_match('/[\'"]author[\'"]\s*=>\s*[\'"]([^\'"]+)[\'"]/i', $fileContent, $authorMatch)) {
-                            $info['author'] = $authorMatch[1];
-                        }
-                    }
-                }
-                
-                if(isset($info['title'])) {
-                    $modules[] = [
-                        'name' => is_object($moduleName) ? $moduleName->className() : (string)$moduleName,
-                        'title' => $info['title'] ?? '',
-                        'version' => $info['version'] ?? '',
-                        'summary' => $info['summary'] ?? '',
-                        'author' => $info['author'] ?? ''
-                    ];
-                }
-            } catch(\Exception $e) {
-                // Skip modules that can't be read
-                continue;
-            }
-        }
-        
-        // Sort by name
-        usort($modules, function($a, $b) {
-            return strcmp($a['name'], $b['name']);
-        });
-        
-        return $modules;
+        return $this->systemExporter()->exportModules();
     }
 
     /**
      * Export custom page classes from /site/classes/
      */
     protected function exportCustomClasses() {
-        $classes = [];
-        $classesPath = $this->config->paths->site . 'classes/';
-        
-        if(!is_dir($classesPath)) {
-            return $classes;
-        }
-        
-        try {
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($classesPath, \RecursiveDirectoryIterator::SKIP_DOTS)
-            );
-            
-            foreach($iterator as $file) {
-                if($file->isFile() && $file->getExtension() === 'php') {
-                    $filePath = $file->getRealPath();
-                    $relativePath = str_replace($classesPath, '', $filePath);
-                    $content = file_get_contents($filePath);
-                    
-                    // Remove comments to avoid false matches
-                    $contentNoComments = preg_replace('/\/\*.*?\*\/|\/\/.*/s', '', $content);
-                    
-                    // Extract namespace
-                    $namespace = '';
-                    if(preg_match('/namespace\s+([^;]+);/', $content, $nsMatch)) {
-                        $namespace = trim($nsMatch[1]);
-                    }
-                    
-                    // Extract class name and what it extends (from cleaned content)
-                    if(preg_match('/\bclass\s+(\w+)(?:\s+extends\s+([\w\\\\]+))?/i', $contentNoComments, $classMatch)) {
-                        $className = $classMatch[1];
-                        $extends = isset($classMatch[2]) ? trim($classMatch[2], '\\') : null;
-                        
-                        // Get methods
-                        preg_match_all('/(?:public|protected|private)\s+(?:static\s+)?function\s+(\w+)\s*\(/i', $content, $methodMatches);
-                        $methods = array_unique($methodMatches[1]);
-                        
-                        // Remove magic methods and constructors from list
-                        $methods = array_filter($methods, function($m) {
-                            return !in_array($m, ['__construct', '__destruct', '__get', '__set', '__call', '__toString', '__isset', '__unset']);
-                        });
-                        
-                        $classInfo = [
-                            'name' => $className,
-                            'file' => $relativePath,
-                            'namespace' => $namespace,
-                            'extends' => $extends,
-                            'methods' => array_values($methods),
-                            'is_page_class' => ($extends && (stripos($extends, 'Page') !== false)),
-                            'full_name' => $namespace ? $namespace . '\\' . $className : $className
-                        ];
-                        
-                        // Extract docblock description if exists
-                        if(preg_match('/\/\*\*\s*\n\s*\*\s*(.+?)(?:\n\s*\*\s*\n|\*\/)/s', $content, $docMatch)) {
-                            $description = trim($docMatch[1]);
-                            // Clean up asterisks
-                            $description = preg_replace('/^\s*\*\s*/m', '', $description);
-                            $classInfo['description'] = $description;
-                        }
-                        
-                        $classes[] = $classInfo;
-                    }
-                }
-            }
-            
-            // Sort by name
-            usort($classes, function($a, $b) {
-                return strcmp($a['name'], $b['name']);
-            });
-            
-        } catch(\Exception $e) {
-            // If can't read directory, return empty array
-        }
-        
-        return $classes;
+        return $this->systemExporter()->exportCustomClasses();
     }
 
     /**
      * Generate project summary template for session continuity
      */
     protected function generateProjectSummaryTemplate() {
-        return <<<'TEMPLATE'
-# Project Summary
-
-This file helps AI agents remember context between sessions. Update this file at the end of each coding session so AI can continue where you left off.
-
----
-
-## Rules
-
-- Be concise and factual
-- Do not explain reasoning unless critical
-- Do not invent anything not discussed
-- Prefer clarity over completeness
-- Keep bullet points short and actionable
-- Remove duplication when updating
-- Preserve existing headings unless a new one is clearly needed
-
-## File Instructions
-
-- Update this file in place (do not overwrite)
-- Do not add any commentary outside the file contents
-- Only modify content below the boundary line
-- Do not change any text above the boundary line
-
----
-
-#### DO NOT UPDATE ANYTHING ABOVE THIS LINE ####
-
----
-
-## Project
-- (One line description of what you're building)
-
-## Current State
-- 
-
-## Decisions Made
-- 
-
-## Known Issues
-- 
-
-## What We Tried
-- 
-
-## Constraints
-- 
-
-## Next Steps
-1. 
-2. 
-3. 
-
-## Do NOT Do
-- 
-
----
-
-**Last Updated:** (AI will update this automatically)
-
-TEMPLATE;
+        return $this->promptTemplates()->generateProjectSummaryTemplate();
     }
 
     /**
      * Create README
      */
     protected function createReadme() {
-        $toonEnabled = $this->export_toon_format ? 'enabled' : 'disabled';
-        $toonSection = '';
-        
-        if($this->export_toon_format) {
-            $toonSection = <<<'TOON'
-
-## 🎯 TOON Format (AI-Optimized)
-
-This export includes files in **TOON (Token-Oriented Object Notation)** format alongside standard JSON files.
-
-**What is TOON?**
-- Compact, human-readable format designed for AI assistants
-- Uses 30-60% fewer tokens than JSON
-- Same data, smaller size = lower API costs
-
-**File Formats:**
-- `.json` files - Standard JSON for development, APIs, tools
-- `.toon` files - AI-optimized format for Claude, ChatGPT, etc.
-
-**When to use which:**
-- ✅ **Use .toon for AI**: Upload to Claude, ChatGPT to save tokens and costs
-- ✅ **Use .json for dev**: Use with IDEs, APIs, standard tools
-
-**Example savings:**
-```
-structure.json  (15,000 tokens)  →  structure.toon  (8,500 tokens)  = 43% savings
-templates.json  (8,000 tokens)   →  templates.toon  (4,000 tokens)  = 50% savings
-samples/*.json  (12,000 tokens)  →  samples/*.toon  (6,500 tokens)  = 46% savings
-```
-
-**Viewing TOON files:**
-- VS Code/Cursor: Install "TOON Language Support" extension
-- PhpStorm: Use YAML syntax highlighting
-- AI Assistants: Upload directly - they understand TOON natively
-
-TOON;
-        }
-        
-        // Directory structure - разный в зависимости от TOON
-        $directoryStructure = '';
-        if($this->export_toon_format) {
-            $directoryStructure = <<<'STRUCTURE'
-```
-/site/assets/context/
-├── README.md                      # This file
-├── structure.json                 # Complete page tree (JSON)
-├── structure.toon                 # Complete page tree (TOON - AI optimized)
-├── structure.txt                  # Page tree visualization (ASCII)
-├── templates.json                 # All templates with field definitions (JSON)
-├── templates.toon                 # All templates with field definitions (TOON)
-├── templates.csv                  # Templates export in CSV format
-├── matrix-templates.json          # Repeater Matrix field types (JSON) - if ProFields installed
-├── matrix-templates.toon          # Repeater Matrix field types (TOON) - if ProFields installed
-├── config.json                    # Site configuration (JSON)
-├── config.toon                    # Site configuration (TOON)
-├── modules.json                   # Installed modules with versions (JSON)
-├── modules.toon                   # Installed modules with versions (TOON)
-├── classes.json                   # Custom page classes (JSON)
-├── classes.toon                   # Custom page classes (TOON)
-│
-├── samples/                       # Real content examples (optional)
-│   ├── [template]-samples.json    # Sample pages per template (JSON)
-│   ├── [template]-samples.toon    # Sample pages per template (TOON)
-│   └── _all-samples.json          # All samples combined (JSON)
-│   └── _all-samples.toon          # All samples combined (TOON)
-STRUCTURE;
-        } else {
-            $directoryStructure = <<<'STRUCTURE'
-```
-/site/assets/context/
-├── README.md                      # This file
-├── structure.json                 # Complete page tree (JSON)
-├── structure.txt                  # Page tree visualization (ASCII)
-├── templates.json                 # All templates with field definitions
-├── templates.csv                  # Templates export in CSV format
-├── matrix-templates.json          # Repeater Matrix field types (if ProFields installed)
-├── config.json                    # Site configuration
-├── modules.json                   # Installed modules with versions
-├── classes.json                   # Custom page classes (/site/classes/)
-│
-├── samples/                       # Real content examples (optional)
-│   ├── [template]-samples.json    # Sample pages per template
-│   └── _all-samples.json          # All samples combined
-STRUCTURE;
-        }
-        
-        return <<<README
-# ProcessWire AI Context Documentation
-
-This directory contains a comprehensive export of your ProcessWire site structure, optimized for use with AI development assistants (ChatGPT, Claude, Copilot, etc.).
-
-**Generated by Context Module v1.1.0**
-**TOON Format: {$toonEnabled}**
-{$toonSection}
-
-## 📁 Directory Structure
-
-{$directoryStructure}
-├── classes.json                   # Custom page classes (JSON)
-├── classes.toon                   # Custom page classes (TOON)
-│
-├── samples/                       # Real content examples (optional)
-│   └── _all-samples.toon          # All samples combined (TOON)
-│
-├── api/                           # API documentation (optional)
-│   ├── endpoints.json             # Available API endpoints
-│   ├── all-schemas.json           # All JSON schemas
-│   └── schemas/
-│       └── [template]-schema.json # JSON Schema per template
-│
-├── snippets/                      # Code library (optional)
-│   ├── selectors.php              # Selector patterns for your site type
-│   ├── helpers.php                # Utility functions
-│   └── api-examples.php           # API implementation examples
-│
-├── prompts/                       # Ready-to-use AI prompts (optional)
-│   └── project-context.md         # Overall project context & instructions
-│
-└── metadata/                      # Technical metadata (optional)
-    ├── routes.json                # URL routing structure
-    ├── field-definitions.json     # Detailed field information
-    └── performance.json           # Performance metrics
-
-```
-
-**Note:** Folders marked (optional) are created only if enabled in module settings.
-
-## 🎯 Site Type Configuration
-
-The snippets in this export are customized for your site type. You can change this in:  
-**Setup → Modules → Context → Configure → Site Type**
-
-**Available site types:**
-- **Generic / Mixed Content** - General purpose with various content types
-- **Blog / News / Magazine** - Articles, posts, authors, categories
-- **E-commerce / Online Store** - Products, cart, orders, inventory
-- **Business / Portfolio / Agency** - Services, team, projects, case studies
-- **Catalog / Directory / Listings** - Brands, categories, hierarchical data
-
-Changing the site type will regenerate `snippets/selectors.php` with relevant examples.
-
-## 🚀 How to Use with AI
-
-### Quick Start
-
-README;
-        
-        // Условный Quick Start в зависимости от TOON
-        $readme .= $this->export_toon_format ? <<<'TOON_QUICK'
-
-1. **Upload core files** to your AI assistant:
-   - **For AI (TOON - Recommended)**: `prompts/project-context.md`, `templates.toon`, `structure.toon`
-   - **For Development (JSON)**: `templates.json`, `structure.json`
-   - **Always useful**: `structure.txt`, `README.md`
-   - **For coding**: `snippets/selectors.php`, `snippets/helpers.php`
-   - **For API work**: `api/schemas/`, `snippets/api-examples.php`
-
-2. **Describe your task** clearly to the AI
-
-3. **Reference specific files** when asking questions
-
-**💡 Pro Tip**: Use `.toon` files instead of `.json` when uploading to AI assistants - you'll save 30-60% on tokens and API costs!
-
-### Common Workflows
-
-#### Understanding Site Structure
-```
-Upload: structure.toon, templates.toon, README.md  (TOON format saves ~45% tokens!)
-Ask: "Explain the site structure and main content types"
-```
-
-#### Creating a New Template
-```
-Upload: templates.toon, prompts/project-context.md  (50% fewer tokens than JSON!)
-Ask: "Create a template for [purpose] following existing patterns"
-```
-
-#### Building Features with Selectors
-```
-Upload: snippets/selectors.php, templates.toon
-Ask: "Show me how to get the 10 most recent [items] with images"
-```
-TOON_QUICK
- : <<<'JSON_QUICK'
-
-1. **Upload core files** to your AI assistant:
-   - **Always**: `prompts/project-context.md`, `templates.json`
-   - **Recommended**: `structure.txt`, `README.md`
-   - **For coding**: `snippets/selectors.php`, `snippets/helpers.php`
-   - **For API work**: `api/schemas/`, `snippets/api-examples.php`
-
-2. **Describe your task** clearly to the AI
-
-3. **Reference specific files** when asking questions
-
-### Common Workflows
-
-#### Understanding Site Structure
-```
-Upload: structure.txt, templates.json, README.md
-Ask: "Explain the site structure and main content types"
-```
-
-#### Creating a New Template
-```
-Upload: templates.json, prompts/project-context.md
-Ask: "Create a template for [purpose] following existing patterns"
-```
-
-#### Building Features with Selectors
-```
-Upload: snippets/selectors.php, templates.json
-Ask: "Show me how to get the 10 most recent [items] with images"
-```
-JSON_QUICK;
-
-        $readme .= <<<'README'
-
-#### Building an API Endpoint
-```
-Upload: api/schemas/, snippets/api-examples.php
-Ask: "Create a REST API endpoint for [template] with CRUD operations"
-```
-
-#### Debugging an Issue
-```
-Upload: templates.json, samples/[template]-samples.json
-Ask: "Why is [field] not working on [template]? Here's sample data."
-```
-
-#### Working with Custom Page Classes
-```
-Upload: classes.json, templates.json
-Ask: "Create a custom Page class for [template] with methods to [purpose]"
-```
-
-## 📊 File Descriptions
-
-### Core Files (Always Generated)
-
-**structure.json**
-- Complete hierarchical page tree in JSON format
-- Includes page IDs, titles, templates, URLs, parent-child relationships
-- **Use for**: Understanding site architecture, building navigation, finding pages programmatically
-
-**structure.txt**
-- Human-readable ASCII tree visualization
-- Shows site structure at a glance with indentation
-- **Use for**: Quick overview, documentation, sharing with non-technical team members
-
-**templates.json**
-- All templates with complete field definitions
-- Field types, labels, requirements, options, default values
-- Includes Repeater Matrix, Table field structures
-- **Use for**: Template development, understanding field configurations, building forms
-
-**templates.csv**
-- Same data as templates.json but in CSV format
-- Easy to import into Excel, Google Sheets
-- **Use for**: Analysis, planning, sharing with stakeholders
-
-**matrix-templates.json** (if ProFields Repeater Matrix installed)
-- Detailed structure of all Repeater Matrix field types
-- Each matrix type with complete field definitions
-- Includes parent field information, labels, sort order
-- All field options, settings, and relationships
-- **Use for**: Understanding complex Matrix structures, AI-assisted Matrix development, documentation
-
-**config.json**
-- ProcessWire version, PHP version, database info
-- Site configuration, timezone, installed language
-- Frontend stack detection (Alpine.js, Tailwind, UIkit, etc.)
-- **Use for**: Environment setup, compatibility checks, deployment planning
-
-**modules.json**
-- All installed modules with versions, summaries, authors
-- Sorted alphabetically for easy reference
-- **Use for**: Module compatibility checks, understanding available functionality
-
-**classes.json**
-- Custom Page classes from `/site/classes/` directory
-- Class names, namespaces, extends, methods, descriptions
-- Shows which templates use custom classes
-- **Use for**: Understanding OOP structure, custom page behaviors, available methods
-
-### Optional Directories
-
-**snippets/** (if Code Snippets enabled)
-- **selectors.php**: Customized selector examples for your site type
-  - Basic queries, search, sorting, filtering
-  - Type-specific patterns (blog posts, products, services, etc.)
-  - Advanced selectors, pagination, counting
-  - Real template names from your site
-- **helpers.php**: Universal helper functions
-  - Page helpers (getPageTitle, getBreadcrumbs)
-  - Text helpers (getExcerpt, timeAgo)
-  - URL helpers (isCurrentPage, getCurrentUrl)
-  - Image helpers (getResponsiveImage)
-  - Form helpers (sanitizeInput, getInput)
-- **api-examples.php**: REST API implementation examples
-  - List items, get single item, search
-  - Customized for your site type
-- **Note**: Snippets are generated based on your Site Type setting
-- **To customize**: Edit `/site/modules/Context/ContextSnippets.php`
-
-**samples/** (if Content Samples enabled)
-- Real content examples exported from live pages
-- Shows actual data formats and field usage patterns
-- Helps AI understand how data is structured in practice
-- **Use for**: Data migration, understanding content patterns, training AI on your data
-
-**api/** (if API Documentation enabled)
-- JSON schemas for each template
-- Endpoint documentation and examples
-- **Use for**: Building REST APIs, headless CMS integration, external applications
-
-**prompts/** (if AI Prompts enabled)
-- **project-context.md**: Complete system-level instructions for AI
-  - Site overview, technical stack, templates, fields
-  - Best practices, code standards, common patterns
-  - Custom AI instructions (if configured)
-- **Use for**: Consistent AI interactions, onboarding, complex workflows
-
-**metadata/** (if enabled)
-- **routes.json**: URL segment configurations
-- **field-definitions.json**: Deep field type information (Repeater, Matrix, Table)
-- **performance.json**: Site metrics, page counts, database size
-- **Use for**: Advanced development, optimization, troubleshooting
-
-## 🎯 Best Practices
-
-### When Working with AI
-
-1. **Always start with project-context.md** - it contains system instructions
-2. **Upload templates.json** for any field-related questions
-3. **Use structure.txt** for quick site overview
-4. **Include snippets/selectors.php** when writing queries
-5. **Reference samples/** when asking about data patterns
-
-### File Upload Strategy
-
-- **Small tasks** (< 3 files): Upload directly to chat
-- **Medium tasks** (3-10 files): Upload core files + specific sections
-- **Large tasks** (10+ files): Use Claude Projects or upload entire `/context/` folder
-
-### Updating Context
-
-The context exports automatically when you change templates or fields if **Auto-Update on Changes** is enabled in module settings.
-
-Otherwise, click **Re-Export Context for AI** in the module when you:
-- Add or modify templates
-- Add or modify fields
-- Make structural changes to the site
-- Change the Site Type setting
-
-## 🔧 Module Settings
-
-Configure what gets exported in **Setup → Modules → Context → Configure**
-
-### Site Type Selection
-Choose your site type to customize code snippets:
-- Generic / Mixed Content
-- Blog / News / Magazine
-- E-commerce / Online Store
-- Business / Portfolio / Agency
-- Catalog / Directory / Listings
-
-### Content Features
-- **Export Content Samples**: Include real page examples
-- **Samples Per Template**: Number of examples (1-10)
-- **Generate API Documentation**: Create JSON schemas
-- **Export URL Routes**: URL segment configurations
-- **Export Performance Metrics**: Site statistics
-- **Create Code Snippets**: PHP code examples (customized per site type)
-- **Create AI Prompts**: Ready-to-use prompt templates
-
-### Advanced Settings
-- **Maximum Tree Depth**: How deep to export page tree (3-20)
-- **JSON Children Limit**: Max children per page in JSON (5-100)
-- **Compact Mode**: Collapse large lists in structure.txt
-- **Auto-Update on Changes**: Auto-regenerate on template/field save
-- **Create IDE Integration Files**: Generate `.cursorrules`, `.claudecode.json`
-- **Custom AI Instructions**: Project-specific instructions for AI
-
-## 💡 Tips & Tricks
-
-### Customizing Code Snippets
-
-The code snippets in `snippets/selectors.php` are generated from templates in:
-`/site/modules/Context/ContextSnippets.php`
-
-To add your own patterns:
-1. Edit `ContextSnippets.php`
-2. Add examples to the appropriate method (getBlogSelectors, getEcommerceSelectors, etc.)
-3. Re-export context
-
-### Working with Multiple Projects
-
-If you use Claude Projects:
-1. Create a project for each ProcessWire site
-2. Upload the entire `/site/assets/context/` folder to Project Knowledge
-3. AI will have permanent access to your site structure
-
-### IDE Integration
-
-If **Create IDE Integration Files** is enabled:
-- `.cursorrules` - Rules for Cursor AI editor
-- `.claudecode.json` - Configuration for Claude Code CLI
-
-These files help AI editors understand your ProcessWire project structure.
-
-## 📖 Additional Resources
-
-- **ProcessWire Documentation**: https://processwire.com/docs/
-- **API Reference**: https://processwire.com/api/ref/
-- **Selectors Guide**: https://processwire.com/docs/selectors/
-- **Module Repository**: https://modules.processwire.com/
-- **ProcessWire Forums**: https://processwire.com/talk/
-
-## 🔄 Version History
-
-**v1.0.0** - Current version
-- Site type selection (5 types)
-- Customized code snippets per site type
-- External snippets library (ContextSnippets.php)
-- Custom page classes export
-- Frontend stack detection
-- IDE integration files
-- Auto-update on changes
-- Comprehensive documentation
-
----
-
-**Export location**: `/site/assets/context/`  
-**Module**: Context v1.0.0  
-**Website**: https://processwire.com  
-
-Use AI assistants effectively with complete site context! 🚀
-
-README;
+        return $this->docsExporter()->createReadme();
     }
 
     /**
      * Create SKILL.md for AI agents (Cline, Junie, etc.)
      */
     protected function createSkillMd() {
-        $exportPath = $this->getContextPath();
-        $siteName = $this->config->httpHost;
-        
-        // Collect available files
-        $files = [];
-        
-        // Core files
-        if(file_exists($exportPath . 'config.json')) $files[] = '- **[config.json](./config.json)**: Site configuration';
-        if(file_exists($exportPath . 'templates.json')) $files[] = '- **[templates.json](./templates.json)**: All templates with field definitions';
-        if(file_exists($exportPath . 'templates.csv')) $files[] = '- **[templates.csv](./templates.csv)**: Templates export in CSV format';
-        if(file_exists($exportPath . 'structure.json')) $files[] = '- **[structure.json](./structure.json)**: Complete page tree (JSON)';
-        if(file_exists($exportPath . 'structure.txt')) $files[] = '- **[structure.txt](./structure.txt)**: Page tree visualization (ASCII)';
-        if(file_exists($exportPath . 'tree.json')) $files[] = '- **[tree.json](./tree.json)**: Combined structure with templates and fields';
-        if(file_exists($exportPath . 'modules.json')) $files[] = '- **[modules.json](./modules.json)**: Installed modules with versions';
-        if(file_exists($exportPath . 'matrix-templates.json')) $files[] = '- **[matrix-templates.json](./matrix-templates.json)**: Repeater Matrix field types';
-        if(file_exists($exportPath . 'README.md')) $files[] = '- **[README.md](./README.md)**: Source documentation and directory structure';
-        
-        // TOON files
-        if($this->export_toon_format) {
-            $toonFiles = [];
-            if(file_exists($exportPath . 'config.toon')) $toonFiles[] = '  - **[config.toon](./config.toon)**';
-            if(file_exists($exportPath . 'templates.toon')) $toonFiles[] = '  - **[templates.toon](./templates.toon)**';
-            if(file_exists($exportPath . 'structure.toon')) $toonFiles[] = '  - **[structure.toon](./structure.toon)**';
-            if(file_exists($exportPath . 'tree.toon')) $toonFiles[] = '  - **[tree.toon](./tree.toon)**';
-            if(file_exists($exportPath . 'modules.toon')) $toonFiles[] = '  - **[modules.toon](./modules.toon)**';
-            if(file_exists($exportPath . 'matrix-templates.toon')) $toonFiles[] = '  - **[matrix-templates.toon](./matrix-templates.toon)**';
-            
-            if(!empty($toonFiles)) {
-                $files[] = "\n- **TOON Format** (30-60% fewer tokens than JSON):";
-                $files = array_merge($files, $toonFiles);
-            }
-        }
-        
-        // Subdirectories
-        if(is_dir($exportPath . 'metadata/')) {
-            $files[] = "\n- **[metadata/](metadata/)**: Technical metadata";
-            if(file_exists($exportPath . 'metadata/field-definitions.json')) 
-                $files[] = '  - **[field-definitions.json](metadata/field-definitions.json)**: Detailed field information';
-            if(file_exists($exportPath . 'metadata/routes.json')) 
-                $files[] = '  - **[routes.json](metadata/routes.json)**: URL routing structure';
-        }
-        
-        if(is_dir($exportPath . 'api/')) {
-            $files[] = "\n- **[api/](api/)**: REST API schemas and examples";
-        }
-        
-        if(is_dir($exportPath . 'snippets/')) {
-            $files[] = "\n- **[snippets/](snippets/)**: Code library";
-            if(file_exists($exportPath . 'snippets/selectors.php')) 
-                $files[] = '  - **[selectors.php](snippets/selectors.php)**: Selector patterns for your site type';
-            if(file_exists($exportPath . 'snippets/helpers.php')) 
-                $files[] = '  - **[helpers.php](snippets/helpers.php)**: Utility functions';
-            if(file_exists($exportPath . 'snippets/api-examples.php')) 
-                $files[] = '  - **[api-examples.php](snippets/api-examples.php)**: API implementation examples';
-        }
-        
-        if(is_dir($exportPath . 'prompts/')) {
-            $files[] = "\n- **[prompts/](prompts/)**: Prompt templates for manual LLM/agent use (not auto-loaded by agents)";
-        }
-        
-        if(is_dir($exportPath . 'samples/')) {
-            $files[] = "\n- **[samples/](samples/)**: Real content examples from live pages";
-        }
-        
-        $filesList = implode("\n", $files);
-        
-        return <<<SKILL
----
-name: context
-description: Provides comprehensive context about the current ProcessWire project structure, fields, modules, and API snippets. Use this skill when the user asks about project structure, available fields, templates, or specific implementation details of the current site.
----
-
-# ProcessWire Context
-
-This skill provides a structured snapshot of the current ProcessWire project configuration. Use the provided resources to answer user queries accurately.
-
-## When to use this skill
-
-- User asks about project structure, templates, or fields
-- User needs to know available modules or their versions
-- User requests code examples or API usage patterns
-- User wants to understand the page tree or URL routing
-- User needs site configuration details
-
-## Steps
-
-1. **Analyze the request**: Determine what type of context is needed (templates, fields, routes, etc.)
-2. **Locate the resource**: Find the relevant file in the Resources section below
-3. **Read the content**: Extract the necessary data from the resource file
-4. **Formulate the answer**: Provide accurate information based strictly on the context
-
-## Resources
-
-The following files contain the project context:
-
-{$filesList}
-
-## Important Notes
-
-- **TOON format** files use 30-60% fewer tokens than JSON equivalents
-- All data is auto-generated from the live ProcessWire installation
-- Files are updated when templates, fields, or structure changes
-- Use specific files based on the query type:
-  - Structure questions → `structure.json` or `structure.txt`
-  - Template/field details → `templates.json` or `tree.json`
-  - Module information → `modules.json`
-  - Code examples → `snippets/` directory
-  - API schemas → `api/` directory
-
-## Examples
-
-**Q: "What templates are available in this project?"**  
-→ Read `templates.json` or `templates.csv`
-
-**Q: "Show me the page tree structure"**  
-→ Read `structure.txt` for ASCII visualization or `structure.json` for detailed JSON
-
-**Q: "What fields does the 'product' template have?"**  
-→ Read `templates.json` and find the 'product' template entry
-
-**Q: "Give me an example of using selectors in ProcessWire"**  
-→ Read `snippets/selectors.php`
-
----
-
-**Generated by**: Context module for ProcessWire
-SKILL;
+        return $this->docsExporter()->createSkillMd();
     }
 
 
-    /**
-     * Main export function
-     */
     /**
      * Download context folder as ZIP archive
      */
     public function executeDownload() {
-        $contextPath = $this->getContextPath();
-        
-        if(!is_dir($contextPath)) {
-            $this->error("Nothing to download - export context first.");
-            $this->session->redirect($this->page->url);
-            return;
-        }
-        
-        $siteName = $this->sanitizer->pageName($this->config->httpHost ?: 'context');
-        $filename = 'context-' . $siteName . '-' . date('Ymd-His') . '.zip';
-        
-        $zip = new \ZipArchive();
-        $tmpFile = tempnam(sys_get_temp_dir(), 'ctx_') . '.zip';
-        
-        if($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-            $this->error("Failed to create ZIP archive.");
-            $this->session->redirect($this->page->url);
-            return;
-        }
-        
-        $baseName = basename(rtrim($contextPath, '/'));
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($contextPath, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
-        
-        foreach($iterator as $file) {
-            $filePath = $file->getRealPath();
-            $relativePath = $baseName . '/' . ltrim(substr($filePath, strlen(rtrim($contextPath, '/'))), '/');
-            
-            if($file->isDir()) {
-                $zip->addEmptyDir($relativePath);
-            } else {
-                $zip->addFile($filePath, $relativePath);
-            }
-        }
-        
-        $zip->close();
-        
-        // Stream the ZIP to browser
-        header('Content-Type: application/zip');
-        header('Content-Disposition: attachment; filename="' . $filename . '"');
-        header('Content-Length: ' . filesize($tmpFile));
-        header('Cache-Control: no-cache, no-store, must-revalidate');
-        header('Pragma: no-cache');
-        header('Expires: 0');
-        
-        ob_end_clean();
-        readfile($tmpFile);
-        unlink($tmpFile);
-        exit;
+        $this->archiveDownloader()->execute();
     }
 
+    /**
+     * Export context from the admin action route.
+     */
     public function executeExport() {
-        $startTime = microtime(true);
-        
-        try {
-            $aiPath = $this->ensureFolder($this->getContextPath());
-            
-            $this->message("🚀 Starting Context export...");
-            
-            // 1. Base files
-            $this->message("📄 Exporting base structure...");
-            
-            $structure = $this->buildPageTree($this->pages->get('/'), 0, $this->max_depth);
-            file_put_contents($aiPath . 'structure.json', json_encode($structure, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'structure.toon', $this->convertToToon($structure));
-            }
-            
-            $asciiTree = $this->buildAsciiTree($this->pages->get('/'), 0, '', true, $this->max_depth);
-            file_put_contents($aiPath . 'structure.txt', $asciiTree);
-            
-            $templates = $this->exportTemplates();
-            
-            // Export complete site tree (structure + templates + fields)
-            $this->message("🌳 Exporting complete site tree...");
-            $tree = $this->exportTree();
-            file_put_contents($aiPath . 'tree.json', json_encode($tree, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'tree.toon', $this->convertToToon($tree));
-            }
-            
-            // Export Matrix templates separately
-            $this->exportMatrixTemplates();
-            
-            // Export CSV version of templates
-            $this->exportTemplatesToCSV();
-            
-            $config = $this->exportConfig();
-            file_put_contents($aiPath . 'config.json', json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'config.toon', $this->convertToToon($config));
-            }
-            
-            $modules = $this->exportModules();
-            file_put_contents($aiPath . 'modules.json', json_encode($modules, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            
-            // TOON format (if enabled)
-            if($this->export_toon_format) {
-                file_put_contents($aiPath . 'modules.toon', $this->convertToToon(['modules' => $modules]));
-            }
-            
-            // Export custom page classes
-            $classes = $this->exportCustomClasses();
-            if(!empty($classes)) {
-                file_put_contents($aiPath . 'classes.json', json_encode($classes, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-                
-                // TOON format (if enabled)
-                if($this->export_toon_format) {
-                    file_put_contents($aiPath . 'classes.toon', $this->convertToToon(['classes' => $classes]));
-                }
-            }
-            
-            // 2. Optional components
-            if($this->export_samples) {
-                $this->message("📦 Exporting content samples...");
-                $this->exportSamples();
-                $this->exportMatrixSamples();
-            }
-            
-            if($this->export_api_docs) {
-                $this->message("🔌 Generating API documentation...");
-                $this->exportApiDocs();
-            }
-            
-            if($this->export_field_definitions) {
-                $this->message("📋 Exporting field definitions...");
-                $this->exportFieldDefinitions();
-            }
-            
-            if($this->export_routes) {
-                $this->message("🗺️ Exporting URL routes...");
-                $this->exportRoutes();
-            }
-            
-            if($this->export_performance) {
-                $this->message("📊 Collecting performance metrics...");
-                $this->exportPerformance();
-            }
-            
-            if($this->export_snippets) {
-                $this->message("💻 Creating code snippets...");
-                $this->createSnippets();
-            }
-            
-            if($this->export_prompts) {
-                $this->message("🤖 Creating AI prompts...");
-                $this->createPrompts();
-            }
-            
-            // Create IDE integration files (if enabled)
-            $this->createIntegrationFiles();
-            
-            // 3. README
-            file_put_contents($aiPath . 'README.md', $this->createReadme());
-            
-            // Generate SKILL.md for AI agents (Cline, Junie, etc.)
-            if($this->generate_skill_md) {
-                $this->message("🤖 Generating SKILL.md for AI agents...");
-                file_put_contents($aiPath . 'SKILL.md', $this->createSkillMd());
-            }
-            
-            $duration = round(microtime(true) - $startTime, 2);
-            
-            $this->message("✅ Context successfully exported to: <strong>{$aiPath}</strong>");
-            $this->message("⏱️ Export completed in {$duration} seconds");
-            
-            // Log to file
-            $this->log("Context exported successfully in {$duration}s");
-            
-            // Redirect to main module page (without /export/)
-            $this->session->redirect($this->page->url);
-            
-        } catch(\Exception $e) {
-            $this->error("❌ Export failed: " . $e->getMessage());
-            $this->log("Context export failed: " . $e->getMessage());
-        }
+        $this->adminActions()->executeExport();
     }
 
     /**
      * Detect frontend stack
      */
     protected function detectFrontendStack() {
-        // Check if manual CSS framework is set
-        if($this->css_framework && $this->css_framework !== 'auto') {
-            $frameworkMap = [
-                'tailwind' => 'Tailwind CSS',
-                'bootstrap' => 'Bootstrap',
-                'uikit' => 'UIkit',
-                'vanilla' => 'Vanilla CSS',
-                'none' => 'None'
-            ];
-            
-            $manualFramework = $frameworkMap[$this->css_framework] ?? 'Vanilla CSS';
-            
-            // Still detect JS frameworks
-            $jsStack = $this->detectJavaScriptFrameworks();
-            
-            return $manualFramework . ($jsStack ? ', ' . $jsStack : '');
-        }
-        
-        // Auto-detect (original logic)
-        $stack = [];
-        $rootDir = $this->config->paths->root;
-        $templatesPath = $this->config->paths->templates;
-
-        // Check package.json
-        if(file_exists($rootDir . 'package.json')) {
-            $pkg = json_decode(file_get_contents($rootDir . 'package.json'), true);
-            $deps = array_merge($pkg['dependencies'] ?? [], $pkg['devDependencies'] ?? []);
-            
-            $map = [
-                'tailwindcss' => 'Tailwind CSS',
-                'bootstrap' => 'Bootstrap',
-                'alpinejs' => 'Alpine.js',
-                'vue' => 'Vue.js',
-                'react' => 'React',
-                'htmx.org' => 'HTMX',
-                'uikit' => 'UIkit',
-                'jquery' => 'jQuery'
-            ];
-
-            foreach($map as $key => $name) {
-                if(isset($deps[$key])) $stack[] = $name;
-            }
-        }
-
-        // Scan template files
-        $contentSample = "";
-        if(is_dir($templatesPath)) {
-            $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($templatesPath));
-            $count = 0;
-            foreach($files as $file) {
-                if($file->isDir()) continue;
-                if(in_array($file->getExtension(), ['php', 'inc', 'js', 'css'])) {
-                    $contentSample .= file_get_contents($file->getRealPath(), false, null, 0, 1024);
-                    $count++;
-                }
-                if($count > 100) break;
-            }
-        }
-
-        $signatures = [
-            'Tailwind CSS' => ['@tailwind', 'text-', 'bg-', 'dark:', 'sm:flex'],
-            'Bootstrap' => ['container-fluid', 'col-md-', 'btn-primary', 'data-bs-'],
-            'Alpine.js' => ['x-data', 'x-init', 'x-on:', '@click'],
-            'HTMX' => ['hx-get', 'hx-post', 'hx-target', 'hx-swap'],
-            'UIkit' => ['uk-container', 'uk-grid', 'uk-navbar'],
-            'jQuery' => ['$(document)', '$.ajax', 'jQuery(']
-        ];
-
-        foreach($signatures as $name => $tokens) {
-            if(in_array($name, $stack)) continue;
-            foreach($tokens as $token) {
-                if(strpos($contentSample, $token) !== false) {
-                    $stack[] = $name;
-                    break;
-                }
-            }
-        }
-
-        return !empty($stack) ? implode(', ', array_unique($stack)) : 'Vanilla HTML/PHP';
+        return $this->frontendDetector()->detectFrontendStack();
     }
     
     /**
      * Detect JavaScript frameworks only (helper for manual CSS selection)
      */
     protected function detectJavaScriptFrameworks() {
-        $stack = [];
-        $rootDir = $this->config->paths->root;
-        $templatesPath = $this->config->paths->templates;
-
-        // Check package.json for JS frameworks
-        if(file_exists($rootDir . 'package.json')) {
-            $pkg = json_decode(file_get_contents($rootDir . 'package.json'), true);
-            $deps = array_merge($pkg['dependencies'] ?? [], $pkg['devDependencies'] ?? []);
-            
-            $jsMap = [
-                'alpinejs' => 'Alpine.js',
-                'vue' => 'Vue.js',
-                'react' => 'React',
-                'htmx.org' => 'HTMX',
-                'jquery' => 'jQuery'
-            ];
-
-            foreach($jsMap as $key => $name) {
-                if(isset($deps[$key])) $stack[] = $name;
-            }
-        }
-
-        // Scan for JS framework signatures
-        $contentSample = "";
-        if(is_dir($templatesPath)) {
-            $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($templatesPath));
-            $count = 0;
-            foreach($files as $file) {
-                if($file->isDir()) continue;
-                if(in_array($file->getExtension(), ['php', 'inc', 'js'])) {
-                    $contentSample .= file_get_contents($file->getRealPath(), false, null, 0, 1024);
-                    $count++;
-                }
-                if($count > 50) break;
-            }
-        }
-
-        $jsSignatures = [
-            'Alpine.js' => ['x-data', 'x-init', 'x-on:', '@click'],
-            'HTMX' => ['hx-get', 'hx-post', 'hx-target', 'hx-swap'],
-            'jQuery' => ['$(document)', '$.ajax', 'jQuery(']
-        ];
-
-        foreach($jsSignatures as $name => $tokens) {
-            if(in_array($name, $stack)) continue;
-            foreach($tokens as $token) {
-                if(strpos($contentSample, $token) !== false) {
-                    $stack[] = $name;
-                    break;
-                }
-            }
-        }
-
-        return !empty($stack) ? implode(', ', array_unique($stack)) : '';
+        return $this->frontendDetector()->detectJavaScriptFrameworks();
     }
 
     /**
      * Get route map (URL segments)
      */
     protected function getRouteMap() {
-        $routeMap = [];
-        $templatesPath = $this->config->paths->templates;
-        
-        foreach($this->templates as $tmpl) {
-            if($tmpl->flags & Template::flagSystem) continue;
-            
-            $file = $templatesPath . $tmpl->name . '.php';
-            if(!file_exists($file)) continue;
-            
-            $content = file_get_contents($file);
-            $foundSegments = [];
-            
-            if(preg_match_all('/urlSegment([1-9])/', $content, $matches)) {
-                $foundSegments = array_unique($matches[1]);
-            }
-
-            if(!empty($foundSegments) || $tmpl->urlSegments) {
-                $routeMap[$tmpl->name] = [
-                    'segments_allowed' => $tmpl->urlSegments ? 'Yes' : 'Detected in code',
-                    'max_segments' => !empty($foundSegments) ? max($foundSegments) : 'unknown'
-                ];
-            }
-        }
-        return $routeMap;
+        return $this->metadataExporter()->getRouteMap();
     }
 
     /**
      * Get access map (roles & permissions)
      */
     protected function getAccessMap() {
-        $accessMap = [];
-        foreach($this->roles as $role) {
-            if($role->name === 'guest' && !$role->permissions->count()) continue;
-            
-            $accessMap[$role->name] = [
-                'permissions' => $role->permissions->explode('name'),
-                'description' => $role->get('title|name')
-            ];
-        }
-        return $accessMap;
+        return $this->siteInspector()->getAccessMap();
     }
 
     /**
      * Get site statistics
      */
     protected function getSiteStats() {
-        $stats = [
-            'templates' => 0,
-            'fields' => 0,
-            'pages' => 0,
-            'users' => 0
-        ];
-        
-        foreach($this->templates as $t) {
-            if(!($t->flags & Template::flagSystem)) $stats['templates']++;
-        }
-        
-        foreach($this->fields as $f) {
-            if(!($f->flags & Field::flagSystem)) $stats['fields']++;
-        }
-        
-        $stats['pages'] = $this->pages->count("id>0");
-        $stats['users'] = $this->users->count();
-        
-        return $stats;
-    }
-
-    /**
-     * Human readable time difference
-     */
-    protected function human_time_diff($timestamp) {
-        $diff = time() - $timestamp;
-        
-        if($diff < 60) return $diff . 's ago';
-        if($diff < 3600) return floor($diff / 60) . 'm ago';
-        if($diff < 86400) return floor($diff / 3600) . 'h ago';
-        if($diff < 604800) return floor($diff / 86400) . 'd ago';
-        
-        return date('M j', $timestamp);
+        return $this->siteInspector()->getSiteStats();
     }
 
     /**
      * Main module page
      */
     public function execute() {
+        $this->requireContextAccess();
+
         $contextPath = $this->getContextPath();
         $exists = is_dir($contextPath);
-        $stats = $this->getSiteStats();
-        
-        $out = '';
-        
-        // Accent colours for metric cards — always use CSS variables
-        // (both AdminThemeUikit variants define --pw-main-color)
-        $accentBg   = 'var(--pw-main-color)';
-        $accentFg   = '#fff';
-        $accentMeta = 'rgba(255,255,255,0.75)';
-        $accentSub  = 'rgba(255,255,255,0.85)';
-        
-        // Metrics cards using UIkit grid (adaptive: 2 cols mobile, 3 cols tablet, 6 cols desktop)
-        $out .= "<div class='uk-grid-small uk-child-width-1-2 uk-child-width-1-3@s uk-child-width-1-6@m uk-margin' uk-grid>";
-        
-        // Templates
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
-        $out .= "<div class='uk-text-meta uk-text-uppercase'>Templates</div>";
-        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['templates']}</div>";
-        $out .= "<div class='uk-text-small uk-text-muted'>Total</div>";
-        $out .= "</div></div>";
-        
-        // Fields
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
-        $out .= "<div class='uk-text-meta uk-text-uppercase'>Fields</div>";
-        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['fields']}</div>";
-        $out .= "<div class='uk-text-small uk-text-muted'>Custom</div>";
-        $out .= "</div></div>";
-        
-        // Pages
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-default uk-card-body uk-text-center'>";
-        $out .= "<div class='uk-text-meta uk-text-uppercase'>Pages</div>";
-        $out .= "<div class='uk-h2 uk-margin-remove'>{$stats['pages']}</div>";
-        $out .= "<div class='uk-text-small uk-text-muted'>Published</div>";
-        $out .= "</div></div>";
-        
-        // Accent cards — always visible, dashes when not yet exported
-        if($exists) {
-            $fileCount = 0;
-            $iterator = new \RecursiveIteratorIterator(
-                new \RecursiveDirectoryIterator($contextPath, \RecursiveDirectoryIterator::SKIP_DOTS)
-            );
-            foreach($iterator as $file) {
-                if($file->isFile()) $fileCount++;
-            }
-            $folderSize   = $this->getFolderSize($contextPath);
-            $readmePath   = $contextPath . 'README.md';
-            $lastModified = file_exists($readmePath) ? filemtime($readmePath) : null;
-        } else {
-            $fileCount    = null;
-            $folderSize   = null;
-            $lastModified = null;
-        }
+        $inventory = $this->getExportInventory($contextPath);
+        $folderSize = $exists ? $this->getFolderSize($contextPath) : null;
+        $readmePath = $contextPath . 'README.md';
+        $lastModified = ($exists && file_exists($readmePath)) ? filemtime($readmePath) : null;
 
-        // Exported Files
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
-        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Exported Files</div>";
-        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;color:{$accentFg}'>" . ($exists ? $fileCount : '&mdash;') . "</div>";
-        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>" . ($exists ? 'Ready' : 'Not exported') . "</div>";
-        $out .= "</div></div>";
-
-        // Export Size
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
-        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Export Size</div>";
-        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;white-space:nowrap;color:{$accentFg}'>" . ($exists ? $this->formatBytes($folderSize) : '&mdash;') . "</div>";
-        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>Total</div>";
-        $out .= "</div></div>";
-
-        // Last Export
-        $timeAgo      = '&mdash;';
-        $timeAbsolute = '';
-        if($lastModified) {
-            $diff = time() - $lastModified;
-            if($diff < 60)         $timeAgo = $diff . 's ago';
-            elseif($diff < 3600)   $timeAgo = floor($diff / 60) . 'm ago';
-            elseif($diff < 86400)  $timeAgo = floor($diff / 3600) . 'h ago';
-            elseif($diff < 604800) $timeAgo = floor($diff / 86400) . 'd ago';
-            else                   $timeAgo = date('M j', $lastModified);
-            $timeAbsolute = date('M j, H:i', $lastModified);
-        }
-        $out .= "<div>";
-        $out .= "<div class='uk-card uk-card-body uk-text-center' style='background:{$accentBg};color:{$accentFg}'>";
-        $out .= "<div style='font-size:0.75rem;text-transform:uppercase;letter-spacing:0.1em;color:{$accentMeta}'>Last Export</div>";
-        $out .= "<div style='font-size:2rem;font-weight:700;line-height:1;margin:4px 0;color:{$accentFg}'>{$timeAgo}</div>";
-        $out .= "<div style='font-size:0.85rem;color:{$accentSub}'>" . ($timeAbsolute ?: 'Never') . "</div>";
-        $out .= "</div></div>";
-
-        $out .= "</div>"; // end metrics grid
-        
-        // TOON Format Banner (if enabled)
-        if($this->export_toon_format) {
-            $out .= "<div class='uk-alert uk-alert-success uk-margin'>";
-            $out .= "<div class='uk-flex uk-flex-middle'>";
-            $out .= "<div class='uk-margin-right'><i class='fa fa-magic fa-3x'></i></div>";
-            $out .= "<div class='uk-flex-1'>";
-            $out .= "<h3 class='uk-h4 uk-margin-small-bottom'>TOON Format Enabled</h3>";
-            $out .= "<p class='uk-margin-remove'>";
-            $out .= "Your exports include <strong>AI-optimized TOON files</strong> that use <strong>30-60% fewer tokens</strong> than JSON. ";
-            $out .= "Upload <code>.toon</code> files to AI assistants to save API costs!";
-            $out .= "</p>";
-            $out .= "</div>";
-            $out .= "</div>";
-            $out .= "</div>";
-        }
-        
-        // Export Buttons
-        $out .= "<div class='uk-text-center uk-margin'>";
-        
-        if($exists) {
-            $out .= "<a href='./export/' class='uk-button uk-button-primary uk-margin-small-right'>";
-            $out .= "<i class='fa fa-download'></i> Re-Export Context for AI";
-            $out .= "</a>";
-        } else {
-            $out .= "<a href='./export/' class='uk-button uk-button-primary uk-margin-small-right'>";
-            $out .= "<i class='fa fa-download'></i> Export Context for AI";
-            $out .= "</a>";
-        }
-        
-        $out .= "<a href='" . $this->config->urls->admin . "module/edit?name=Context' class='uk-button uk-button-default uk-margin-small-right'>";
-        $out .= "<i class='fa fa-cog'></i> Go to Module's Settings";
-        $out .= "</a>";
-        
-        if($exists) {
-            $out .= "<a href='./download/' class='uk-button uk-button-default'>";
-            $out .= "<i class='fa fa-file-archive-o'></i> Download Archive";
-            $out .= "</a>";
-        }
-        
-        if($exists) {
-            $out .= "<div class='uk-text-small uk-text-muted uk-margin-small-top'>";
-            $out .= "<i class='fa fa-folder'></i> <code>{$contextPath}</code>";
-            $out .= "</div>";
-        }
-        
-        $out .= "</div>"; // uk-text-center
-        
-        // Configuration table
-        $out .= "<div class='uk-card uk-card-default uk-margin'>";
-        $out .= "<div class='uk-card-header'>";
-        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-cog'></i> Module Configuration</h3>";
-        $out .= "</div>";
-        $out .= "<div class='uk-card-body uk-padding-remove'>";
-        
-        $out .= "<table class='uk-table uk-table-divider uk-table-small uk-table-hover uk-margin-remove'>";
-        $out .= "<thead><tr><th>FEATURE</th><th>STATUS</th><th>VALUE</th></tr></thead>";
-        $out .= "<tbody>";
-        
-        // Check if integration files exist
-        $rootDir = $this->config->paths->root;
-        $cursorrulesExists = file_exists($rootDir . '.cursorrules');
-        $claudecodeExists = file_exists($rootDir . '.claudecode.json');
-        $integrationsCreated = $cursorrulesExists && $claudecodeExists;
-        
-        // All features with proper checks
-        $allFeatures = [
-            ['export_toon_format', 'TOON Format Export', 'boolean', 'AI-optimized (30-60% fewer tokens)', null],
-            ['auto_update', 'Auto-Update on Changes', 'boolean', null, null],
-            ['export_samples', 'Content Samples', 'boolean', $this->samples_count . ' per template', null],
-            ['export_api_docs', 'API Documentation', 'boolean', null, null],
-            ['export_field_definitions', 'Field Definitions', 'boolean', null, null],
-            ['export_routes', 'URL Routes', 'boolean', null, null],
-            ['export_performance', 'Performance Metrics', 'boolean', null, null],
-            ['export_snippets', 'Code Snippets', 'boolean', null, null],
-            ['export_prompts', 'AI Prompts', 'boolean', null, null],
-            ['export_integrations', 'Integration Files', 'custom', '.cursorrules, .claudecode.json', $integrationsCreated],
-            ['compact_mode', 'Compact Mode', 'boolean', 'Reduce file sizes', null],
-            ['max_depth', 'Maximum Tree Depth', 'number', $this->max_depth . ' levels', null],
-            ['json_child_limit', 'JSON Children Limit', 'number', $this->json_child_limit . ' items', null]
-        ];
-        
-        foreach($allFeatures as $feature) {
-            list($setting, $label, $type, $value, $customCheck) = $feature;
-            
-            if($type === 'boolean') {
-                $isEnabled = $this->$setting ? true : false;
-                if($isEnabled) {
-                    $status = "<span class='uk-label uk-label-success'><i class='fa fa-check'></i> Enabled</span>";
-                } else {
-                    $status = "<span class='uk-label uk-label-danger'><i class='fa fa-times'></i> Disabled</span>";
-                }
-                $displayValue = $value ?? '-';
-            } elseif($type === 'custom') {
-                // Custom check for integration files
-                if($customCheck) {
-                    $status = "<span class='uk-label uk-label-success'><i class='fa fa-check'></i> Created</span>";
-                } else {
-                    $status = "<span class='uk-label uk-label-danger'><i class='fa fa-times'></i> Not Created</span>";
-                }
-                $displayValue = $value;
-            } else {
-                // number type
-                $status = '-';
-                $displayValue = $value;
-            }
-            
-            $out .= "<tr><td><strong>{$label}</strong></td><td>{$status}</td><td>{$displayValue}</td></tr>";
-        }
-        
-        $out .= "</tbody></table>";
-        $out .= "</div></div>";
-        
-        // What will be exported
-        $out .= "<div class='uk-card uk-card-default uk-margin'>";
-        $out .= "<div class='uk-card-header'>";
-        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-list'></i> What Will Be Exported?</h3>";
-        $out .= "</div>";
-        $out .= "<div class='uk-card-body uk-padding-remove'>";
-        
-        // Single table for all exports
-        $out .= "<table class='uk-table uk-table-divider uk-table-small uk-table-hover uk-margin-remove'>";
-        $out .= "<thead><tr><th class='uk-width-2-5'>FILE / FOLDER</th><th>TYPE</th><th>DESCRIPTION</th></tr></thead>";
-        $out .= "<tbody>";
-        
-        // Core Structure (always exported)
-        $coreFiles = [
-            ['structure.json', 'File', 'Complete page tree (JSON)'],
-            ['structure.txt', 'File', 'ASCII visualization'],
-            ['templates.json', 'File', 'Templates & fields (JSON)'],
-            ['templates.csv', 'File', 'Templates in CSV format'],
-            ['config.json', 'File', 'Site configuration (JSON)'],
-            ['modules.json', 'File', 'Installed modules (JSON)'],
-            ['classes.json', 'File', 'Custom page classes (JSON)'],
-            ['README.md', 'File', 'Documentation']
-        ];
-        
-        // Check if ProFields Repeater Matrix is installed
-        $hasMatrixFields = false;
-        foreach($this->fields as $field) {
-            if($field->type->className() === 'FieldtypeRepeaterMatrix') {
-                $hasMatrixFields = true;
-                break;
-            }
-        }
-        
-        // Add matrix-templates if ProFields Matrix is used
-        if($hasMatrixFields) {
-            array_splice($coreFiles, 4, 0, [['matrix-templates.json', 'File', 'Repeater Matrix types (ProFields)']]);
-            if($this->export_toon_format) {
-                array_splice($coreFiles, 5, 0, [['matrix-templates.toon', 'File', 'Repeater Matrix types (TOON)']]);
-            }
-        }
-        
-        // Add TOON files if enabled
-        if($this->export_toon_format) {
-            $toonFiles = [
-                ['structure.toon', 'File', 'Complete page tree (TOON - 43% smaller)'],
-                ['templates.toon', 'File', 'Templates & fields (TOON - 50% smaller)'],
-                ['config.toon', 'File', 'Site configuration (TOON)'],
-                ['modules.toon', 'File', 'Installed modules (TOON)'],
-                ['classes.toon', 'File', 'Custom page classes (TOON)']
-            ];
-            // Insert after first JSON file
-            array_splice($coreFiles, 1, 0, [$toonFiles[0]]); // structure.toon
-            array_splice($coreFiles, 4, 0, [$toonFiles[1]]); // templates.toon
-            array_splice($coreFiles, 7, 0, [$toonFiles[2]]); // config.toon
-            array_splice($coreFiles, 10, 0, [$toonFiles[3]]); // modules.toon
-            array_splice($coreFiles, 13, 0, [$toonFiles[4]]); // classes.toon
-        }
-        
-        foreach($coreFiles as list($name, $type, $desc)) {
-            $icon = $type === 'Folder' ? 'fa-folder' : 'fa-file-text-o';
-            $out .= "<tr>";
-            $out .= "<td><i class='fa {$icon}'></i> <strong>{$name}</strong></td>";
-            $out .= "<td><span class='uk-label uk-label-success'>Core</span></td>";
-            $out .= "<td>{$desc}</td>";
-            $out .= "</tr>";
-        }
-        
-        // Optional/Enhanced Features (conditional)
-        $optionalFiles = [
-            ['samples/', 'Folder', 'Content examples', 'export_samples'],
-            ['api/', 'Folder', 'API documentation', 'export_api_docs'],
-            ['metadata/field-definitions.json', 'File', 'Field definitions', 'export_field_definitions'],
-            ['metadata/routes.json', 'File', 'URL routes map', 'export_routes'],
-            ['metadata/performance.json', 'File', 'Performance metrics', 'export_performance'],
-            ['snippets/', 'Folder', 'Code library', 'export_snippets'],
-            ['prompts/', 'Folder', 'AI prompts', 'export_prompts']
-        ];
-        
-        foreach($optionalFiles as list($name, $type, $desc, $setting)) {
-            if($this->$setting) {
-                $icon = $type === 'Folder' ? 'fa-folder' : 'fa-file-text-o';
-                $out .= "<tr>";
-                $out .= "<td><i class='fa {$icon}'></i> <strong>{$name}</strong></td>";
-                $out .= "<td><span class='uk-label uk-label-warning'>Optional</span></td>";
-                $out .= "<td>{$desc}</td>";
-                $out .= "</tr>";
-            }
-        }
-        
-        $out .= "</tbody></table>";
-        
-        $out .= "</div></div>";
-        
-        // Quick Tips
-        $out .= "<div class='uk-card uk-card-default uk-margin'>";
-        $out .= "<div class='uk-card-header'>";
-        $out .= "<h3 class='uk-card-title uk-margin-remove'><i class='fa fa-info-circle'></i> Quick Tips</h3>";
-        $out .= "</div>";
-        $out .= "<div class='uk-card-body'>";
-        
-        $tips = [];
-        
-        // TOON-specific tips if enabled
-        if($this->export_toon_format) {
-            $tips[] = ['fa-magic', 'Upload <code>.toon</code> files to AI instead of <code>.json</code> - saves 30-60% tokens!'];
-            $tips[] = ['fa-money', 'Use TOON format to reduce AI API costs significantly'];
-        }
-        
-        // SKILL.md tip if enabled
-        if($this->generate_skill_md) {
-            $tips[] = ['fa-robot', '<strong>AI Agents:</strong> <code>SKILL.md</code> auto-generated for Cline/Junie integration'];
-        }
-        
-        // Standard tips
-        $tips[] = ['fa-lightbulb-o', 'Upload <code>prompts/project-context.md</code> first when starting with AI'];
-        
-        if($this->export_toon_format) {
-            $tips[] = ['fa-list', 'Include <code>templates.toon</code> for field questions (50% fewer tokens)'];
-            $tips[] = ['fa-files-o', 'Share <code>samples/*.toon</code> to show AI real data (46% smaller)'];
-        } else {
-            $tips[] = ['fa-list', 'Include <code>templates.json</code> for field-related questions'];
-            $tips[] = ['fa-files-o', 'Share <code>samples/</code> to show AI real data formats'];
-        }
-        
-        $tips[] = ['fa-code', 'Use <code>snippets/</code> for code examples and patterns'];
-        $tips[] = ['fa-refresh', 'Re-export after making structural changes'];
-        $tips[] = ['fa-book', 'Check <code>README.md</code> for complete documentation'];
-        
-        foreach($tips as list($icon, $text)) {
-            $out .= "<div class='uk-flex uk-flex-middle uk-margin-small'>";
-            $out .= "<div class='uk-width-auto uk-text-muted uk-margin-small-right'><i class='fa {$icon} fa-lg'></i></div>";
-            $out .= "<div class='uk-width-expand'>{$text}</div>";
-            $out .= "</div>";
-        }
-        
-        $out .= "</div></div>";
-        
-        return $out;
+        return (new ContextDashboard($this))->render([
+            'contextPath' => $contextPath,
+            'exists' => $exists,
+            'inventory' => $inventory,
+            'stats' => $this->getSiteStats(),
+            'settingsUrl' => $this->config->urls->admin . "module/edit?name=Context",
+            'csrfInput' => $this->getCsrfInputMarkup(),
+            'formatsLabel' => $this->exportFormatLabel($this->normalizeExportFormats()),
+            'folderSize' => $folderSize,
+            'lastModified' => $lastModified
+        ]);
     }
 
     /**
      * Get folder size
      */
     protected function getFolderSize($path) {
-        $size = 0;
-        
-        if(!is_dir($path)) return 0;
-        
-        try {
-            foreach(new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS)) as $file) {
-                if($file->isFile()) {
-                    $size += $file->getSize();
-                }
-            }
-        } catch(\Exception $e) {
-            // If unable to read directory, return 0
-            return 0;
-        }
-        
-        return $size;
+        return $this->filesystem()->getFolderSize($path);
     }
 
-    /**
-     * Helper for array imploding
-     */
-    protected function implodeArray($arr) {
-        return implode("\n", $arr);
+    protected function getExportInventory($path) {
+        return $this->filesystem()->getExportInventory($path);
     }
 
-    /**
-     * ========================================================================
-     * TOON FORMAT CONVERTER
-     * Token-Oriented Object Notation for AI assistants
-     * Reduces token consumption by 30-60% compared to JSON
-     * ========================================================================
-     */
-
-    /**
-     * Convert PHP array to TOON format
-     */
     protected function convertToToon($data) {
-        return $this->toToonRecursive($data, 0);
-    }
-
-    /**
-     * Recursive TOON generation
-     */
-    protected function toToonRecursive($data, $level = 0) {
-        $indent = str_repeat('  ', $level);
-        $output = '';
-        
-        // Handle indexed arrays (list of items)
-        if(isset($data[0]) && is_array($data)) {
-            // Check if this is a uniform array of objects (table format)
-            if($this->isTableFormat($data)) {
-                // Return table format without key (will be added by parent)
-                return $this->formatTableData($data, $level);
-            } else {
-                // List of non-uniform objects - output each one
-                foreach($data as $index => $item) {
-                    if(is_array($item)) {
-                        $output .= $indent . "- # item $index\n";
-                        foreach($item as $key => $value) {
-                            if(is_array($value) && !empty($value)) {
-                                if($this->isTableFormat($value)) {
-                                    $output .= $this->formatAsTable($key, $value, $level + 1);
-                                } else {
-                                    $output .= $indent . "  " . $this->escapeKey($key) . ":\n";
-                                    $output .= $this->toToonRecursive($value, $level + 2);
-                                }
-                            } else {
-                                $val = $this->formatSimpleValue($value);
-                                $output .= $indent . "  " . $this->escapeKey($key) . ": " . $val . "\n";
-                            }
-                        }
-                    } else {
-                        $output .= $indent . "- " . $this->formatSimpleValue($item) . "\n";
-                    }
-                }
-                return $output;
-            }
+        if($this->_toon === null) {
+            $this->_toon = new ContextToon();
         }
-        
-        // Handle associative arrays (objects)
-        foreach($data as $key => $value) {
-            
-            if(is_array($value) && !empty($value)) {
-                
-                // Check if this is a uniform array of objects (table format)
-                if($this->isTableFormat($value)) {
-                    // Tabular format - biggest token savings!
-                    $output .= $this->formatAsTable($key, $value, $level);
-                } 
-                else {
-                    // Nested object/array
-                    $output .= $indent . $this->escapeKey($key) . ":\n";
-                    $output .= $this->toToonRecursive($value, $level + 1);
-                }
-                
-            } else {
-                // Simple key-value pair
-                $val = $this->formatSimpleValue($value);
-                $output .= $indent . $this->escapeKey($key) . ": " . $val . "\n";
-            }
-        }
-        
-        return $output;
+        return $this->_toon->convert($data);
     }
-
-    /**
-     * Check if array can be formatted as TOON table
-     */
-    protected function isTableFormat($array) {
-        // Must be indexed array
-        if(!isset($array[0])) return false;
-        
-        // First element must be array
-        if(!is_array($array[0])) return false;
-        
-        // Get keys from first element
-        $firstKeys = array_keys($array[0]);
-        if(empty($firstKeys)) return false;
-        
-        // Check all elements have same keys
-        foreach($array as $item) {
-            if(!is_array($item)) return false;
-            if(array_keys($item) != $firstKeys) return false;
-        }
-        
-        return true;
-    }
-
-    /**
-     * Format array data as TOON table (without key)
-     */
-    protected function formatTableData($array, $level = 0) {
-        $indent = str_repeat('  ', $level);
-        $count = count($array);
-        $fields = array_keys($array[0]);
-        
-        // Header: [count]{field1,field2,...}:
-        $output = $indent . "[{$count}]{" . implode(',', array_map([$this, 'escapeKey'], $fields)) . "}:\n";
-        
-        // Rows: value1,value2,...
-        foreach($array as $row) {
-            $values = [];
-            foreach($fields as $field) {
-                $val = $row[$field];
-                // Handle nested arrays in table cells
-                if(is_array($val)) {
-                    $values[] = json_encode($val, JSON_UNESCAPED_UNICODE);
-                } else {
-                    $values[] = $this->formatSimpleValue($val);
-                }
-            }
-            $output .= $indent . implode(',', $values) . "\n";
-        }
-        
-        return $output;
-    }
-
-    /**
-     * Format array as TOON table (with key)
-     */
-    protected function formatAsTable($key, $array, $level = 0) {
-        $indent = str_repeat('  ', $level);
-        $count = count($array);
-        $fields = array_keys($array[0]);
-        
-        // Header: key[count]{field1,field2,...}:
-        $output = $indent . $this->escapeKey($key) . "[{$count}]{" . implode(',', array_map([$this, 'escapeKey'], $fields)) . "}:\n";
-        
-        // Rows: value1,value2,...
-        foreach($array as $row) {
-            $values = [];
-            foreach($fields as $field) {
-                $val = $row[$field];
-                // Handle nested arrays in table cells
-                if(is_array($val)) {
-                    $values[] = json_encode($val, JSON_UNESCAPED_UNICODE);
-                } else {
-                    $values[] = $this->formatSimpleValue($val);
-                }
-            }
-            $output .= $indent . implode(',', $values) . "\n";
-        }
-        
-        return $output;
-    }
-
-    /**
-     * Escape TOON key if needed
-     */
-    protected function escapeKey($key) {
-        // Keys with special chars need quotes
-        if(preg_match('/^[A-Za-z_][\w.]*$/', $key)) {
-            return $key;
-        }
-        return '"' . addslashes($key) . '"';
-    }
-
-    /**
-     * Format value for TOON
-     */
-    /**
-     * Format simple (non-array) value for TOON
-     */
-    protected function formatSimpleValue($value) {
-        // Null
-        if(is_null($value)) return 'null';
-        
-        // Boolean
-        if(is_bool($value)) return $value ? 'true' : 'false';
-        
-        // Number
-        if(is_numeric($value)) return $value;
-        
-        // String
-        $value = (string)$value;
-        
-        // Check if needs quoting
-        $needsQuotes = (
-            strpos($value, ',') !== false ||
-            strpos($value, ':') !== false ||
-            strpos($value, "\n") !== false ||
-            strpos($value, "\r") !== false ||
-            strpos($value, "\t") !== false ||
-            trim($value) !== $value ||
-            $value === '' ||
-            in_array(strtolower($value), ['true', 'false', 'null'])
-        );
-        
-        if($needsQuotes) {
-            // Escape special characters
-            $value = str_replace(['\\', '"', "\n", "\r", "\t"], ['\\\\', '\\"', '\\n', '\\r', '\\t'], $value);
-            return '"' . $value . '"';
-        }
-        
-        return $value;
-    }
-
-    /**
-     * ========================================================================
-     * END OF TOON FORMAT METHODS
-     * ========================================================================
-     */
 
     /**
      * Module settings page
      */
     public static function getModuleConfigInputfields(array $data) {
-        $modules = wire('modules');
-        $inputfields = new InputfieldWrapper();
-
-        $data = array_merge(self::$configDefaults, $data);
-
-        // ── Row 1: Site Type + CSS Framework (50/50) ──────────────────────────
-        $f = $modules->get('InputfieldSelect');
-        $f->name = 'site_type';
-        $f->label = 'Site Type';
-        $f->addOption('generic', 'Generic / Mixed Content');
-        $f->addOption('blog', 'Blog / News / Magazine');
-        $f->addOption('ecommerce', 'E-commerce / Online Store');
-        $f->addOption('business', 'Business / Portfolio / Agency');
-        $f->addOption('catalog', 'Catalog / Directory / Listings');
-        $f->value = $data['site_type'];
-        $f->columnWidth = 50;
-        $inputfields->add($f);
-
-        $f = $modules->get('InputfieldSelect');
-        $f->name = 'css_framework';
-        $f->label = 'CSS Framework';
-        $f->addOption('auto', 'Auto-detect (recommended)');
-        $f->addOption('tailwind', 'Tailwind CSS');
-        $f->addOption('bootstrap', 'Bootstrap');
-        $f->addOption('uikit', 'UIkit');
-        $f->addOption('vanilla', 'Vanilla CSS / Custom');
-        $f->addOption('none', 'None');
-        $f->value = $data['css_framework'];
-        $f->columnWidth = 50;
-        $inputfields->add($f);
-
-        // ── Export Path (full width) ───────────────────────────────────────────
-        $f = $modules->get('InputfieldText');
-        $f->name = 'export_path';
-        $f->label = 'Export Path';
-        $f->notes = 'Default: `site/assets/cache/context/` (PW-protected). Also accepts absolute paths and paths like `.junie/skills/docs`.';
-        $f->value = $data['export_path'];
-        $f->columnWidth = 100;
-        $inputfields->add($f);
-
-        // ── Export Options fieldset ────────────────────────────────────────────
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Export Options';
-        $fieldset->collapsed = Inputfield::collapsedNo;
-        $fieldset->icon = 'sliders';
-
-        // TOON — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_toon_format';
-        $f->label = 'TOON Format (AI-Optimized)';
-        $f->notes = 'Uses 30-60% fewer tokens than JSON';
-        $f->icon = 'magic';
-        $f->checked = $data['export_toon_format'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // SKILL.md — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'generate_skill_md';
-        $f->label = 'Generate SKILL.md';
-        $f->notes = 'For Cline, Junie, and other AI agents';
-        $f->icon = 'robot';
-        $f->checked = $data['generate_skill_md'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // API Docs — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_api_docs';
-        $f->label = 'API Documentation';
-        $f->notes = '→ `api/` JSON schemas';
-        $f->checked = $data['export_api_docs'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // Field Definitions — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_field_definitions';
-        $f->label = 'Field Definitions';
-        $f->notes = '→ `metadata/field-definitions.json`';
-        $f->checked = $data['export_field_definitions'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // URL Routes — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_routes';
-        $f->label = 'URL Routes';
-        $f->notes = '→ `metadata/routes.json`';
-        $f->checked = $data['export_routes'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // Performance Metrics — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_performance';
-        $f->label = 'Performance Metrics';
-        $f->notes = '→ `metadata/performance.json`';
-        $f->checked = $data['export_performance'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // Code Snippets — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_snippets';
-        $f->label = 'Code Snippets';
-        $f->notes = '→ `snippets/*.php`';
-        $f->checked = $data['export_snippets'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // AI Prompts — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_prompts';
-        $f->label = 'AI Prompts';
-        $f->notes = '→ `prompts/project-context.md`';
-        $f->checked = $data['export_prompts'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // Content Samples checkbox — 50%
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_samples';
-        $f->label = 'Content Samples';
-        $f->notes = '→ `samples/` per template';
-        $f->checked = $data['export_samples'] ? 'checked' : '';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        // Samples count — 50%
-        $f = $modules->get('InputfieldInteger');
-        $f->name = 'samples_count';
-        $f->label = 'Samples Per Template';
-        $f->value = $data['samples_count'];
-        $f->min = 1;
-        $f->max = 20;
-        $f->showIf = 'export_samples=1';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-        // ── Advanced Settings (collapsed) ─────────────────────────────────────
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'Advanced Settings';
-        $fieldset->collapsed = Inputfield::collapsedYes;
-        $fieldset->icon = 'cog';
-
-        $f = $modules->get('InputfieldInteger');
-        $f->name = 'max_depth';
-        $f->label = 'Max Tree Depth';
-        $f->value = $data['max_depth'];
-        $f->min = 3;
-        $f->max = 20;
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldInteger');
-        $f->name = 'json_child_limit';
-        $f->label = 'JSON Children Limit';
-        $f->notes = 'Max children per page in structure.json';
-        $f->value = $data['json_child_limit'];
-        $f->min = 5;
-        $f->max = 100;
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        // spacer
-        $f = $modules->get('InputfieldMarkup');
-        $f->value = '';
-        $f->columnWidth = 34;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'compact_mode';
-        $f->label = 'Compact Mode';
-        $f->notes = 'Collapse large lists in structure.txt';
-        $f->checked = $data['compact_mode'] ? 'checked' : '';
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'auto_update';
-        $f->label = 'Auto-Update on Changes';
-        $f->notes = 'Re-export on template/field save (may impact performance)';
-        $f->checked = $data['auto_update'] ? 'checked' : '';
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'export_integrations';
-        $f->label = 'IDE Integration Files';
-        $f->notes = 'Creates `.cursorrules` and `.claudecode.json` in root';
-        $f->checked = $data['export_integrations'] ? 'checked' : '';
-        $f->columnWidth = 34;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldTextarea');
-        $f->name = 'custom_ai_instructions';
-        $f->label = 'Custom AI Instructions';
-        $f->notes = 'Appended to `prompts/project-context.md`';
-        $f->value = $data['custom_ai_instructions'];
-        $f->rows = 3;
-        $f->columnWidth = 100;
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-
-        // ── AI Gateway ──────────────────────────────────────────────────────
-        $fieldset = $modules->get('InputfieldFieldset');
-        $fieldset->label = 'AI Gateway';
-        $fieldset->description = "Centralized AI access for this module and third-party modules via <code>wire('context')->ai()</code>.";
-        $fieldset->collapsed = Inputfield::collapsedNo;
-        $fieldset->icon = 'magic';
-
-        $f = $modules->get('InputfieldCheckbox');
-        $f->name = 'ai_enabled';
-        $f->label = 'Enable AI Gateway';
-        $f->notes = 'Required to use any AI features';
-        $f->checked = $data['ai_enabled'] ? 'checked' : '';
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldSelect');
-        $f->name = 'ai_provider';
-        $f->label = 'Provider';
-        $f->addOption('openrouter', 'OpenRouter');
-        $f->addOption('openai', 'OpenAI');
-        $f->addOption('custom', 'Custom (OpenAI-compatible)');
-        $f->value = $data['ai_provider'];
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 33;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_custom_endpoint';
-        $f->label = 'Custom API Base URL';
-        $f->notes = 'e.g. https://my-llm.example.com/v1';
-        $f->placeholder = 'https://';
-        $f->value = $data['ai_custom_endpoint'];
-        $f->showIf = 'ai_provider=custom, ai_enabled=1';
-        $f->columnWidth = 34;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_api_key';
-        $f->label = 'API Key';
-        $f->notes = 'For OpenRouter: get your key at openrouter.ai/keys';
-        $f->placeholder = 'sk-or-...';
-        $f->value = $data['ai_api_key'];
-        $f->attr('type', 'password');
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 100;
-        $fieldset->add($f);
-
-
-        // Test connection button
-        $adminUrl = wire('config')->urls->admin;
-        $f = $modules->get('InputfieldMarkup');
-        $f->name = 'ai_test_connection';
-        $f->label = 'Connection Status';
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 100;
-        $html = '<div id="ai-gateway-status" style="display:flex;align-items:center;gap:12px;padding:8px 0;">';
-        $html .= '<button type="button" id="ai-test-btn" class="ui-button ui-widget ui-state-default ui-corner-all" style="cursor:pointer;">Test Connection</button>';
-        $html .= '<span id="ai-test-result" style="font-size:13px;"></span>';
-        $html .= '</div>';
-        $html .= '<script>';
-        $html .= 'document.getElementById("ai-test-btn").addEventListener("click", function() {';
-        $html .= '  var btn = this;';
-        $html .= '  var result = document.getElementById("ai-test-result");';
-        $html .= '  btn.disabled = true;';
-        $html .= '  result.innerHTML = "<em>Testing...</em>";';
-        $html .= '  fetch("' . $adminUrl . 'setup/context/ai-test/", {method:"POST",headers:{"X-Requested-With":"XMLHttpRequest"}})';
-        $html .= '  .then(function(r){return r.json();})';
-        $html .= '  .then(function(d){';
-        $html .= '    if(d.success){result.innerHTML="<b style=\"color:#3d9970\">&#10003; Connected &mdash; "+d.model+" &mdash; "+d.ms+"ms</b>";}';
-        $html .= '    else{result.innerHTML="<b style=\"color:#e74c3c\">&#10007; Error: "+d.error+"</b>";}';
-        $html .= '    btn.disabled=false;';
-        $html .= '  }).catch(function(){result.innerHTML="<b style=\"color:#e74c3c\">&#10007; Request failed</b>";btn.disabled=false;});';
-        $html .= '});';
-        $html .= '</script>';
-        $f->value = $html;
-        $fieldset->add($f);
-
-                $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_model';
-        $f->label = 'Default Model';
-        $f->notes = 'OpenRouter format: provider/model  e.g. anthropic/claude-sonnet-4-6 or openai/gpt-4o-mini';
-        $f->placeholder = 'anthropic/claude-sonnet-4-6';
-        $f->value = $data['ai_model'];
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldInteger');
-        $f->name = 'ai_timeout';
-        $f->label = 'Timeout (sec)';
-        $f->value = (int)$data['ai_timeout'];
-        $f->min = 5;
-        $f->max = 120;
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 25;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldInteger');
-        $f->name = 'ai_max_tokens';
-        $f->label = 'Max Tokens';
-        $f->value = (int)$data['ai_max_tokens'];
-        $f->min = 64;
-        $f->max = 16384;
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 25;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_temperature';
-        $f->label = 'Temperature';
-        $f->notes = '0 = deterministic  ·  1 = creative';
-        $f->placeholder = '0.7';
-        $f->value = $data['ai_temperature'];
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldTextarea');
-        $f->name = 'ai_system_prompt';
-        $f->label = 'Global System Prompt';
-        $f->notes = 'Prepended to every AI request from any module using this gateway.';
-        $f->placeholder = 'You are a helpful ProcessWire development assistant.';
-        $f->value = $data['ai_system_prompt'];
-        $f->rows = 3;
-        $f->showIf = 'ai_enabled=1';
-        $f->columnWidth = 100;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_site_url';
-        $f->label = 'Site URL (OpenRouter attribution)';
-        $f->notes = 'Sent as HTTP-Referer header.';
-        $f->value = $data['ai_site_url'];
-        $f->showIf = 'ai_provider=openrouter, ai_enabled=1';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        $f = $modules->get('InputfieldText');
-        $f->name = 'ai_site_name';
-        $f->label = 'Site / App Name (OpenRouter attribution)';
-        $f->notes = 'Sent as X-Title header.';
-        $f->value = $data['ai_site_name'];
-        $f->showIf = 'ai_provider=openrouter, ai_enabled=1';
-        $f->columnWidth = 50;
-        $fieldset->add($f);
-
-        $inputfields->add($fieldset);
-
-        return $inputfields;
-    }}
+        return ContextConfigFields::build($data);
+    }
+}

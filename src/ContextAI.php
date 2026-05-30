@@ -61,8 +61,16 @@ class ContextAI {
      * @return bool
      */
     public function isEnabled(): bool {
-        return !empty($this->config['ai_enabled'])
-            && !empty($this->config['ai_api_key']);
+        if (empty($this->config['ai_enabled']) || empty($this->config['ai_api_key'])) {
+            return false;
+        }
+
+        $provider = $this->config['ai_provider'] ?? self::PROVIDER_OPENROUTER;
+        if ($provider === self::PROVIDER_CUSTOM && empty($this->config['ai_custom_endpoint'])) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -112,23 +120,29 @@ class ContextAI {
             return ['error' => 'AI gateway is not configured or disabled.', 'status_code' => 0];
         }
 
-        $model       = $options['model']       ?? $this->config['ai_model'] ?? self::DEFAULT_MODEL;
-        $maxTokens   = (int)($options['max_tokens']  ?? $this->config['ai_max_tokens']  ?? 1024);
-        $temperature = (float)($options['temperature'] ?? $this->config['ai_temperature'] ?? 0.7);
-        $caller      = $options['caller']      ?? 'Context';
-        // Allow per-call timeout override (useful for long document generation)
-        $this->config['ai_timeout'] = (int)($options['timeout'] ?? $this->config['ai_timeout'] ?? 120);
+        $model       = trim((string)($options['model'] ?? $this->config['ai_model'] ?? self::DEFAULT_MODEL));
+        $maxTokens   = $this->clampInt($options['max_tokens'] ?? $this->config['ai_max_tokens'] ?? 1024, 1, 200000);
+        $temperature = $this->clampFloat($options['temperature'] ?? $this->config['ai_temperature'] ?? 0.7, 0.0, 2.0);
+        $timeout     = $this->clampInt($options['timeout'] ?? $this->config['ai_timeout'] ?? 120, 5, 300);
+        $caller      = trim((string)($options['caller'] ?? 'Context'));
 
-        $messages = $options['messages'] ?? [];
+        if ($model === '') $model = self::DEFAULT_MODEL;
+        if ($caller === '') $caller = 'Context';
+
+        $messages = $this->normalizeMessages($options['messages'] ?? []);
 
         // Prepend system message if provided
-        if (!empty($options['system'])) {
-            array_unshift($messages, ['role' => 'system', 'content' => $options['system']]);
+        if (isset($options['system']) && trim((string)$options['system']) !== '') {
+            array_unshift($messages, ['role' => 'system', 'content' => (string)$options['system']]);
         }
 
         // Global system prompt from module settings
-        if (!empty($this->config['ai_system_prompt'])) {
-            array_unshift($messages, ['role' => 'system', 'content' => $this->config['ai_system_prompt']]);
+        if (isset($this->config['ai_system_prompt']) && trim((string)$this->config['ai_system_prompt']) !== '') {
+            array_unshift($messages, ['role' => 'system', 'content' => (string)$this->config['ai_system_prompt']]);
+        }
+
+        if (!$messages) {
+            return ['error' => 'AI messages are required.', 'status_code' => 0];
         }
 
         $payload = [
@@ -142,7 +156,7 @@ class ContextAI {
         $headers  = $this->getHeaders($caller);
 
         $startTime = microtime(true);
-        $response  = $this->httpPost($endpoint, $payload, $headers);
+        $response  = $this->httpPost($endpoint, $payload, $headers, $timeout);
         $duration  = round((microtime(true) - $startTime) * 1000); // ms
 
         $result = $this->parseResponse($response);
@@ -269,7 +283,7 @@ class ContextAI {
                 return 'https://api.openai.com/v1/chat/completions';
 
             case self::PROVIDER_CUSTOM:
-                $base = rtrim($this->config['ai_custom_endpoint'] ?? '', '/');
+                $base = rtrim(trim((string)($this->config['ai_custom_endpoint'] ?? '')), '/');
                 return $base . '/chat/completions';
 
             case self::PROVIDER_OPENROUTER:
@@ -295,7 +309,8 @@ class ContextAI {
             $siteUrl  = $this->config['ai_site_url']  ?? (wire('config')->httpHost ?? 'processwire');
             $siteName = $this->config['ai_site_name'] ?? (wire('config')->systemName ?? 'ProcessWire Site');
 
-            $headers['HTTP-Referer'] = 'https://' . ltrim($siteUrl, 'https://');
+            $siteUrl = preg_replace('#^https?://#i', '', (string)$siteUrl);
+            $headers['HTTP-Referer'] = 'https://' . ltrim($siteUrl, '/');
             $headers['X-Title']      = $siteName . ' / ' . $caller;
         }
 
@@ -307,19 +322,22 @@ class ContextAI {
      *
      * @return array ['body' => string, 'status' => int]
      */
-    protected function httpPost(string $url, array $payload, array $headers): array {
+    protected function httpPost(string $url, array $payload, array $headers, int $timeout): array {
         $headersFlat = [];
         foreach ($headers as $k => $v) {
             $headersFlat[] = "{$k}: {$v}";
         }
 
-        $timeout = (int)($this->config['ai_timeout'] ?? 120);
+        $body = json_encode($payload);
+        if ($body === false) {
+            return ['body' => '', 'status' => 0, 'curl_error' => 'JSON encode failed: ' . json_last_error_msg()];
+        }
 
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => json_encode($payload),
+            CURLOPT_POSTFIELDS     => $body,
             CURLOPT_HTTPHEADER     => $headersFlat,
             CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_CONNECTTIMEOUT => 10,
@@ -339,6 +357,59 @@ class ContextAI {
     }
 
     /**
+     * Keep third-party gateway calls within OpenAI-compatible chat message shape.
+     */
+    protected function normalizeMessages($messages): array {
+        if (!is_array($messages)) return [];
+
+        $normalized = [];
+        $allowedRoles = ['system', 'user', 'assistant', 'tool', 'developer'];
+
+        foreach ($messages as $message) {
+            if (!is_array($message)) continue;
+
+            $role = isset($message['role']) ? trim((string)$message['role']) : 'user';
+            if (!in_array($role, $allowedRoles, true)) $role = 'user';
+            if (!array_key_exists('content', $message)) continue;
+
+            $content = $message['content'];
+            if (is_scalar($content)) {
+                $content = (string)$content;
+                if ($content === '') continue;
+            } elseif (!is_array($content)) {
+                continue;
+            }
+
+            $normalized[] = [
+                'role'    => $role,
+                'content' => $content,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Clamp integer request options to predictable bounds.
+     */
+    protected function clampInt($value, int $min, int $max): int {
+        $value = (int)$value;
+        if ($value < $min) return $min;
+        if ($value > $max) return $max;
+        return $value;
+    }
+
+    /**
+     * Clamp floating point request options to predictable bounds.
+     */
+    protected function clampFloat($value, float $min, float $max): float {
+        $value = (float)$value;
+        if ($value < $min) return $min;
+        if ($value > $max) return $max;
+        return $value;
+    }
+
+    /**
      * Parse raw HTTP response into a structured array.
      */
     protected function parseResponse(array $response): array {
@@ -349,10 +420,13 @@ class ContextAI {
         }
 
         $data = json_decode($response['body'] ?? '', true);
+        if (!is_array($data)) {
+            return ['error' => 'Invalid JSON response from AI provider.', 'status_code' => $status];
+        }
 
         if ($status !== 200) {
             $msg = $data['error']['message'] ?? ('HTTP ' . $status);
-            return ['error' => $msg, 'status_code' => $status, 'raw' => $response['body']];
+            return ['error' => $msg, 'status_code' => $status];
         }
 
         $content = $data['choices'][0]['message']['content'] ?? '';
@@ -373,23 +447,31 @@ class ContextAI {
         if (!$key) return [];
 
         $ch = curl_init(self::OPENROUTER_BASE_URL . '/models');
+        if (!$ch) return [];
+
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER     => ['Authorization: Bearer ' . $key],
             CURLOPT_TIMEOUT        => 10,
+            CURLOPT_SSL_VERIFYPEER => true,
         ]);
         $body = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
         curl_close($ch);
 
+        if ($error || $status !== 200 || !is_string($body)) return [];
+
         $data = json_decode($body, true);
-        if (empty($data['data'])) return [];
+        if (!is_array($data) || empty($data['data']) || !is_array($data['data'])) return [];
 
         $models = [];
         foreach ($data['data'] as $m) {
+            if (!is_array($m)) continue;
             $id   = $m['id'] ?? '';
             $name = $m['name'] ?? $id;
             if ($id) {
-                $models[$id] = $name;
+                $models[(string)$id] = (string)$name;
             }
         }
 
