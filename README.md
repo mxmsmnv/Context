@@ -2,6 +2,8 @@
 
 Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
+If this project helps your work, consider supporting future development: [GitHub Sponsors](https://github.com/sponsors/mxmsmnv) or [smnv.org/sponsor](https://smnv.org/sponsor/).  
+
 ## What It Does
 
 Context automatically generates comprehensive documentation of your ProcessWire site in formats optimized for AI assistants. Export in both **JSON** (standard) and **TOON** (AI-optimized) formats. 
