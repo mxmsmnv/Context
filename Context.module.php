@@ -22,7 +22,8 @@ class Context extends Process implements Module, ConfigurableModule {
             'title' => 'Context', 
             'version' => 200,
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
-            'author' => 'Maxim Alex',
+            'author' => 'Maxim Semenov',
+            'href'     => 'https://smnv.org',
             'icon' => 'code',
             'permissions' => [
                 'context-admin' => 'Administer Context exports and AI gateway'
