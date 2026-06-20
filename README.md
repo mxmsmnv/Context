@@ -2,6 +2,8 @@
 
 Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
+![Context](assets/Context.png)
+
 **Author:** Maxim Semenov  
 **Website:** [smnv.org](https://smnv.org)  
 **Email:** [maxim@smnv.org](mailto:maxim@smnv.org)
