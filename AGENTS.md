@@ -352,5 +352,5 @@ Make sure you're running from ProcessWire root directory (where index.php is loc
 
 ---
 
-**Generated for**: Context Module v2.0.0
+**Generated for**: Context Module v2.0.1
 **Compatible with**: Claude Code, Cursor, Windsurf, Copilot, and other AI coding agents

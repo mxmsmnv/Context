@@ -15,12 +15,12 @@
 
 class Context extends Process implements Module, ConfigurableModule {
 
-    const VERSION = '2.0.0';
+    const VERSION = '2.0.1';
 
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => 200,
+            'version' => 201,
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Semenov',
             'href'     => 'https://smnv.org',
@@ -76,10 +76,12 @@ class Context extends Process implements Module, ConfigurableModule {
         'ai_custom_endpoint' => ''
     ];
 
-    /**
-     * Constructor - apply default values
-     */
-    public function __construct() {
+    /** Track whether static dependencies are loaded */
+    protected static $dependenciesLoaded = false;
+
+    protected static function loadDependencies() : void {
+        if(self::$dependenciesLoaded) return;
+
         require_once __DIR__ . '/src/ContextAI.php';
         require_once __DIR__ . '/src/ContextToon.php';
         require_once __DIR__ . '/src/ContextSampleSerializer.php';
@@ -106,6 +108,15 @@ class Context extends Process implements Module, ConfigurableModule {
         require_once __DIR__ . '/src/ContextExportFormats.php';
         require_once __DIR__ . '/src/ContextSiteInspector.php';
         require_once __DIR__ . '/src/ContextWebHelper.php';
+
+        self::$dependenciesLoaded = true;
+    }
+
+    /**
+     * Constructor - apply default values
+     */
+    public function __construct() {
+        self::loadDependencies();
         foreach(self::$configDefaults as $key => $value) {
             $this->$key = $value;
         }
@@ -912,6 +923,7 @@ class Context extends Process implements Module, ConfigurableModule {
      * Module settings page
      */
     public static function getModuleConfigInputfields(array $data) {
+        self::loadDependencies();
         return ContextConfigFields::build($data);
     }
 }
