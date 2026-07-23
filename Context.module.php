@@ -15,12 +15,12 @@
 
 class Context extends Process implements Module, ConfigurableModule {
 
-    const VERSION = '2.0.1';
+    const VERSION = '2.1.0';
 
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => 201,
+            'version' => 210,
             'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
             'author' => 'Maxim Semenov',
             'href'     => 'https://smnv.org',
@@ -64,7 +64,7 @@ class Context extends Process implements Module, ConfigurableModule {
         'generate_skill_md' => 1,
         // AI Gateway
         'ai_enabled'         => 0,
-        'ai_provider'        => 'openrouter',
+        'ai_provider'        => 'squad',
         'ai_api_key'         => '',
         'ai_model'           => 'anthropic/claude-sonnet-4-6',
         'ai_max_tokens'      => 1024,

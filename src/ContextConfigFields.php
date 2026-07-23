@@ -231,7 +231,7 @@ class ContextConfigFields {
         // ── AI Gateway ──────────────────────────────────────────────────────
         $fieldset = $modules->get('InputfieldFieldset');
         $fieldset->label = 'AI Gateway';
-        $fieldset->description = "Centralized AI access for this module and third-party modules via <code>wire('context')->ai()</code>.";
+        $fieldset->description = "AI access for this module and third-party modules via <code>wire('context')->ai()</code>. Use Squad to keep provider keys and model selection in one encrypted gateway.";
         $fieldset->collapsed = Inputfield::collapsedNo;
         $fieldset->icon = 'magic';
 
@@ -246,12 +246,23 @@ class ContextConfigFields {
         $f = $modules->get('InputfieldSelect');
         $f->name = 'ai_provider';
         $f->label = 'Provider';
+        $f->addOption('squad', 'Squad (recommended)');
         $f->addOption('openrouter', 'OpenRouter');
         $f->addOption('openai', 'OpenAI');
         $f->addOption('custom', 'Custom (OpenAI-compatible)');
         $f->value = $data['ai_provider'];
         $f->showIf = 'ai_enabled=1';
         $f->columnWidth = 33;
+        $fieldset->add($f);
+
+        $f = $modules->get('InputfieldMarkup');
+        $f->name = 'ai_squad_settings';
+        $f->label = 'Squad Gateway';
+        $f->value = '<p>Context will use the active key, default provider, and model configured in '
+            . '<a href="' . wire('config')->urls->admin . 'module/edit?name=Squad">Squad settings</a>. '
+            . 'No provider credential is stored in Context.</p>';
+        $f->showIf = 'ai_provider=squad, ai_enabled=1';
+        $f->columnWidth = 100;
         $fieldset->add($f);
 
         $f = $modules->get('InputfieldText');
@@ -271,7 +282,7 @@ class ContextConfigFields {
         $f->placeholder = 'sk-or-...';
         $f->value = $data['ai_api_key'];
         $f->attr('type', 'password');
-        $f->showIf = 'ai_enabled=1';
+        $f->showIf = 'ai_provider!=squad, ai_enabled=1';
         $f->columnWidth = 100;
         $fieldset->add($f);
 
@@ -314,10 +325,10 @@ class ContextConfigFields {
         $f = $modules->get('InputfieldText');
         $f->name = 'ai_model';
         $f->label = 'Default Model';
-        $f->notes = 'OpenRouter format: provider/model  e.g. anthropic/claude-sonnet-4-6 or openai/gpt-4o-mini';
+        $f->notes = 'For direct providers only. Squad mode uses the model selected for the active Squad key.';
         $f->placeholder = 'anthropic/claude-sonnet-4-6';
         $f->value = $data['ai_model'];
-        $f->showIf = 'ai_enabled=1';
+        $f->showIf = 'ai_provider!=squad, ai_enabled=1';
         $f->columnWidth = 50;
         $fieldset->add($f);
 

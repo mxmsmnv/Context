@@ -309,13 +309,15 @@ if($ai->isEnabled()) {
 
 | Provider | Setting value | Notes |
 |----------|---------------|-------|
+| Squad | `squad` | Recommended; uses Squad's encrypted active key, default provider, and selected model |
 | OpenRouter | `openrouter` | 200+ models, single API key at openrouter.ai/keys |
 | OpenAI | `openai` | Direct OpenAI API |
 | Custom | `custom` | Any OpenAI-compatible endpoint |
 
 ### Default Model
 
-`anthropic/claude-sonnet-4-6` (configurable in module settings)
+Squad mode uses the model selected for Squad's active default key. Direct
+provider mode defaults to `anthropic/claude-sonnet-4-6`.
 
 ## Troubleshooting
 
@@ -352,5 +354,5 @@ Make sure you're running from ProcessWire root directory (where index.php is loc
 
 ---
 
-**Generated for**: Context Module v2.0.1
+**Generated for**: Context Module v2.1.0
 **Compatible with**: Claude Code, Cursor, Windsurf, Copilot, and other AI coding agents
