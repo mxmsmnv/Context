@@ -346,6 +346,9 @@ class ContextAI {
         if (!$squad || !method_exists($squad, 'ask')) {
             return ['error' => 'Squad is not installed or unavailable.', 'status_code' => 0];
         }
+        if ($model === '') {
+            $model = $this->squadDefaultModel($squad);
+        }
 
         $systemParts = [];
         $history = [];
@@ -417,6 +420,21 @@ class ContextAI {
 
         $this->logRequest($caller, $result['model'], $messages, $result);
         return $result;
+    }
+
+    /**
+     * Read the selected model from Squad's active default key.
+     */
+    protected function squadDefaultModel(object $squad): string {
+        if (!method_exists($squad, 'getDefaultProviderKey')
+            || !method_exists($squad, 'getProvider')) {
+            return '';
+        }
+
+        $provider = $squad->getProvider((string)$squad->getDefaultProviderKey());
+        return $provider && method_exists($provider, 'getModel')
+            ? trim((string)$provider->getModel())
+            : '';
     }
 
     /**
