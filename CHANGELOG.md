@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Discontinued the standalone Context project.
-- Merged the complete Context feature set into the private [Jigsaw](https://github.com/mxmsmnv/Jigsaw) module.
+- Moved the complete Context module into the [Jigsaw](https://github.com/mxmsmnv/Jigsaw) toolkit.
 - Existing Context installations remain usable, but future development and maintenance continue in Jigsaw.
 
 ## [2.1.0] - 2026-07-23

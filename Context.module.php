@@ -21,7 +21,7 @@ class Context extends Process implements Module, ConfigurableModule {
         return [
             'title' => 'Context', 
             'version' => 220,
-            'summary' => '[DISCONTINUED] Context has been merged into the private Jigsaw module',
+            'summary' => '[DISCONTINUED] Context is now maintained as a bundled module in Jigsaw',
             'author' => 'Maxim Semenov',
             'href'     => 'https://smnv.org',
             'icon' => 'code',
