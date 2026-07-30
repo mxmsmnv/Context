@@ -15,13 +15,13 @@
 
 class Context extends Process implements Module, ConfigurableModule {
 
-    const VERSION = '2.1.0';
+    const VERSION = '2.2.0';
 
     public static function getModuleInfo() {
         return [
             'title' => 'Context', 
-            'version' => 210,
-            'summary' => 'Export ProcessWire site context for AI development (JSON + TOON formats)',
+            'version' => 220,
+            'summary' => '[DISCONTINUED] Context has been merged into the private Jigsaw module',
             'author' => 'Maxim Semenov',
             'href'     => 'https://smnv.org',
             'icon' => 'code',

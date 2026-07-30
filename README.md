@@ -1,5 +1,10 @@
 # Context - ProcessWire Module
 
+> [!IMPORTANT]
+> **This project is discontinued.** Its complete functionality has been merged into the private
+> [mxmsmnv/Jigsaw](https://github.com/mxmsmnv/Jigsaw) module. Existing installations can continue
+> using Context 2.2.0, but all future development and maintenance will happen in Jigsaw.
+
 Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
 ![Context](assets/Context.png)
