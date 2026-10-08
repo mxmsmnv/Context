@@ -1,5 +1,10 @@
 # Context - ProcessWire Module
 
+> [!IMPORTANT]
+> **This standalone repository is discontinued.** Context is now an internal feature of the
+> [mxmsmnv/Jigsaw](https://github.com/mxmsmnv/Jigsaw) super-module. Existing installations can
+> continue using Context 2.2.0; development continues in the Jigsaw repository.
+
 Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
 ![Context](assets/Context.png)
