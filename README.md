@@ -5,6 +5,17 @@
 > [mxmsmnv/Jigsaw](https://github.com/mxmsmnv/Jigsaw) super-module. Existing installations can
 > continue using Context 2.2.0; development continues in the Jigsaw repository.
 
+## PocketWire compatibility
+
+The discontinued standalone Context module intentionally remains a **web fallback**
+and does not opt in as a native PocketWire provider. Its purpose is
+to export broad site structure, configuration, code metadata and optional real
+content samples; its CLI evaluation surface is also intentionally more powerful
+than a bounded mobile DTO. Exposing either through PocketWire would not provide
+an honest read-only, privacy-minimal contract. Use the maintained Jigsaw feature
+for future integration work; standalone Context 2.2.0 receives no simulated SDK
+surface or version bump.
+
 Export your ProcessWire site structure as AI-optimized context for ChatGPT, Claude, and other AI assistants.
 
 ![Context](assets/Context.png)
